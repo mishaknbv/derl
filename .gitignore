@@ -1,0 +1,6 @@
+*.swo
+*.swp
+
+derl.egg-info/
+
+**/__pycache__

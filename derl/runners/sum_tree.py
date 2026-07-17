@@ -1,4 +1,5 @@
 """ Sum tree data structure for prioritized experience replay. """
+from math import ceil, log2
 import numpy as np
 
 
@@ -7,7 +8,9 @@ class SumTree:
   contain sum of their leafs. """
   def __init__(self, size):
     self.size = size
-    self.data = np.zeros(2 * size - 1)
+    self.padded_size = pow(2, ceil(log2(size)))
+    # padded_size - 1 is the number of non-leaf elements in the tree
+    self.data = np.zeros(self.padded_size + size - 1)
 
   @property
   def sum(self):
@@ -16,7 +19,7 @@ class SumTree:
 
   def get_value(self, index):
     """ Returns elements value under index. """
-    return self.data[index + self.size - 1]
+    return self.data[index + self.padded_size - 1]
 
   def replace(self, index, value):
     """ Replaces element under index with new value. """
@@ -29,7 +32,7 @@ class SumTree:
       raise ValueError(f"index out of bounds [0, {self.size}): {index}")
     if np.unique(index).size != index.size:
       raise ValueError(f"index must be unique, got {index}")
-    index += self.size - 1
+    index += self.padded_size - 1
     old_value = np.asarray(self.data[index])
     self.data[index] = value
     while index.size:
@@ -43,8 +46,8 @@ class SumTree:
     is closest to `value` without being less than it. """
     value = np.array(value)
     index = np.zeros_like(value, dtype=np.int32)
-    while np.min(index) < self.size - 1:
-      mask = index < self.size - 1
+    while np.min(index) < self.padded_size - 1:
+      mask = index < self.padded_size - 1
       masked_index, masked_value = index[mask], value[mask]
       left, right = 2 * masked_index + 1, 2 * masked_index + 2
       go_left = masked_value <= self.data[left]
@@ -55,4 +58,6 @@ class SumTree:
       index[mask] = masked_index
       masked_value[go_right] -= self.data[left[go_right]]
       value[mask] = masked_value
-    return index - self.size + 1
+    result = index - self.padded_size + 2
+    result[result == self.size + 1] = -1
+    return result
