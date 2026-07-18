@@ -1,0 +1,37 @@
+[project]
+name = "derl"
+version = "0.1.0"
+description = "Deep Reinforcement Learning Package"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "gymnasium>=1.3.0",
+    "torch>=2.13.0",
+    "tensorboard>=1.15.0",
+    "opencv-python",
+    "tqdm",
+]
+
+license = "MIT"
+authors = [
+    { name = "Mikhail Konobeev", email = "mishaknbv@gmail.com" }
+]
+
+[tool.setuptools]
+packages = ["derl"]
+
+[project.optional-dependencies]
+dev = [
+    "pylint>=4.0.6",
+]
+
+mujoco = [
+    "mujoco>=3.10.0"
+]
+
+atari = [
+    "ale-py>=0.12.0"
+]
+
+[project.scripts]
+derl = "derl.scripts.derl:main"
