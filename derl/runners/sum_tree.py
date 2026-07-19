@@ -42,7 +42,7 @@ class SumTree:
       np.add.at(self.data, index, value - old_value)
 
   def retrieve(self, value):
-    """ Returns element under index `i` such that `sum(elements[:i])`
+    """ Returns element under index `i` such that `sum(elements[:i + 1])`
     is closest to `value` without being less than it. """
     value = np.array(value)
     index = np.zeros_like(value, dtype=np.int32)
@@ -58,6 +58,6 @@ class SumTree:
       index[mask] = masked_index
       masked_value[go_right] -= self.data[left[go_right]]
       value[mask] = masked_value
-    result = index - self.padded_size + 2
-    result[result == self.size + 1] = -1
+    result = index - self.padded_size + 1
+    result[result == self.size] = -1
     return result

@@ -14,5 +14,5 @@ class SumTreeTest(TestCase):
     self.assertEqual(sum_tree.get_value(1), 2.)
     self.assertEqual(sum_tree.get_value(2), 3.)
     actual = sum_tree.retrieve(np.asarray([0.5, 1., 1.5, 2.5, 3., 3.5, 6., 6.5]))
-    expected = np.asarray([1, 1, 2, 2, 2, 3, 3, -1])
+    expected = np.asarray([0, 0, 1, 1, 1, 2, 2, -1])
     npt.assert_array_equal(actual, expected)
