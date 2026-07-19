@@ -1,7 +1,7 @@
 """ Defines learner test case. """
 import numpy as np
 from derl.torch_test_case import TorchTestCase
-import derl.summary as summary
+from derl import summary
 
 
 class AlgTestCase(TorchTestCase):

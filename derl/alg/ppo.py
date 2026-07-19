@@ -2,7 +2,7 @@
 import torch
 
 from derl.alg.common import Alg, Loss, r_squared
-import derl.summary as summary
+from derl import summary
 
 
 class PPOLoss(Loss):

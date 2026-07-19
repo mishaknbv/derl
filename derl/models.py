@@ -46,14 +46,17 @@ class NoisyLinear(nn.Module):
     bias_noise = output_noise
     return weight_noise, bias_noise
 
-  def forward(self, inputs):  # pylint: disable=arguments-differ
+  def forward(self, inputs):
+    """ Forward propagates given the inputs. """
     weight_noise, bias_noise = self.sample_noise()
     weight_noise = weight_noise.to(self.weight.device)
     bias_noise = bias_noise.to(self.bias.device)
     noisy_weight = self.weight * weight_noise
     noisy_bias = self.bias * bias_noise
+    # pylint: disable=not-callable
     return (self.linear.forward(inputs)
             + nn.functional.linear(inputs, noisy_weight, noisy_bias))
+    # pylint: enable=not-callable
 
 
 def conv2d_output_shape(height, width, conv2d):
@@ -91,6 +94,17 @@ def collocate_inputs(device=True, dtype=True):
   return decorator
 
 
+def get_device():
+  """ Returns the device for the model / tensors. """
+  if torch.cuda.is_available():
+    device = "cuda"
+  elif torch.backends.mps.is_available():
+    device = "mps"
+  else:
+    device = "cpu"
+  return torch.device(device)
+
+
 class NatureCNNBase(nn.Sequential):
   """ Hidden layers of the Nature DQN model. """
   def __init__(self, input_shape=(84, 84, 4), permute=True, noisy=False):
@@ -115,7 +129,7 @@ class NatureCNNBase(nn.Sequential):
     self.add_module("linear", linear_class(in_features, 512))
 
   @collocate_inputs(dtype=False)
-  def forward(self, inputs):  # pylint: disable=arguments-differ
+  def forward(self, inputs):  # pylint: disable=arguments-renamed
     if self.permute:
       inputs = inputs.permute(0, 3, 1, 2)
     if inputs.dtype == torch.uint8:
@@ -197,6 +211,7 @@ class NatureCNNModel(nn.Module):
 
   @broadcast_inputs(ndims=4)
   def forward(self, *inputs):
+    """ Forward propagates given the inputs. """
     observations, = inputs
     base_outputs = self.base(observations)
     outputs = [layer(base_outputs) for layer in self.output_layers]
@@ -261,6 +276,7 @@ class MuJoCoModel(nn.Module):
   @broadcast_inputs(ndims=2)
   @collocate_inputs()
   def forward(self, *inputs):
+    """ Forward propagates given the inputs. """
     observations, = inputs
     first, *other = (module(observations) for module in self.module_list)
     if self.logstd is None:
@@ -316,6 +332,7 @@ class SACMLP(nn.Module):
                                for _ in range(nheads or 1))
 
   def forward(self, *inputs):
+    """ Forward propagates given the inputs. """
     hidden = self.activation(self.hidden.forward(*inputs))
     return [head(hidden) for head in self.heads][
         slice(None) if self.nheads is not None else 0]
@@ -337,6 +354,7 @@ class ContinuousQValueModel(nn.Module):
   @broadcast_inputs(ndims=2)
   @collocate_inputs()
   def forward(self, *inputs):
+    """ Forward propagates given the inputs. """
     observations, actions = inputs
     cat = torch.cat([observations, actions], -1)
     return self.mlp(cat)
@@ -401,6 +419,7 @@ class SACModel(nn.Module):
       self.active_module = module
 
   def forward(self, *inputs):
+    """ Forward propagates given the inputs. """
     return ([module(*inputs) for module in self.active_module]
             if isinstance(self.active_module, nn.ModuleList)
             else self.active_module(*inputs))

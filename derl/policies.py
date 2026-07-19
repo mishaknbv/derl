@@ -159,7 +159,7 @@ class EpsilonGreedyPolicy(Policy):
       qvalues = self.qvalues_from_preds(preds)
       self.nactions = qvalues.shape[-1]
     if not training and np.random.random() <= epsilon:
-      return {"actions": np.random.randint(self.nactions)}
+      return dict(actions=np.random.randint(self.nactions))
 
     preds = self.model(inputs)
     if training:

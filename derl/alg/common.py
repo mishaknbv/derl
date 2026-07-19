@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 
 import torch
 from tqdm import tqdm
-import derl.summary as summary
+from derl import summary
 
 
 def r_squared(targets, predictions):

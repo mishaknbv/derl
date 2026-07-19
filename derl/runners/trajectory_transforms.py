@@ -27,11 +27,11 @@ class GAE:
       raise ValueError("trajectory cannot contain 'value_targets'")
 
     rewards = trajectory["rewards"]
-    resets = trajectory["resets"]
+    terminated = trajectory["terminated"]
     values = trajectory["values"]
 
     # Values might have an additional last dimension of size 1 as outputs of
-    # dense layers. Need to adjust shapes of rewards and resets accordingly.
+    # dense layers. Need to adjust shapes of rewards and terminated accordingly.
     if (not (0 <= values.ndim - rewards.ndim <= 1)
         or values.ndim == rewards.ndim + 1 and values.shape[-1] != 1):
       raise ValueError(
@@ -48,13 +48,13 @@ class GAE:
     state = trajectory["state"].get("policy_state", None)
     last_value = self.policy.act(observation, state=state,
                                  update_state=False)["values"]
-    if np.asarray(resets[-1]).ndim < last_value.ndim:
+    if np.asarray(terminated[-1]).ndim < last_value.ndim:
       last_value = np.squeeze(last_value, -1)
-    gae[-1] += (1 - resets[-1]) * self.gamma * last_value
+    gae[-1] += (1 - terminated[-1]) * self.gamma * last_value
 
     # pylint: disable=unsubscriptable-object
     for i in range(gae.shape[0] - 1, 0, -1):
-      not_reset = 1 - resets[i - 1]
+      not_reset = 1 - terminated[i - 1]
       next_values = values[i]
       delta = (rewards[i - 1]
                + not_reset * self.gamma * next_values
@@ -75,7 +75,7 @@ class GAE:
 class MergeTimeBatch:
   """ Merges first two axes typically representing time and env batch. """
   def __call__(self, trajectory):
-    assert trajectory["resets"].ndim == 2, trajectory["resets"].shape
+    assert trajectory["terminated"].ndim == 2, trajectory["terminated"].shape
     for key, val in filter(lambda kv: isinstance(kv[1], np.ndarray),
                            trajectory.items()):
       trajectory[key] = np.reshape(val, (-1, *val.shape[2:]))

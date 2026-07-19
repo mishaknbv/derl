@@ -13,7 +13,6 @@ def _np(tensor):
   return tensor
 
 
-
 class TorchTestCase(TestCase):
   """ Test case for testing code with models written in pytorch. """
   def setUp(self):
@@ -24,5 +23,4 @@ class TorchTestCase(TestCase):
   # pylint: disable=invalid-name
   def assertAllClose(self, actual, expected, rtol=1e-7, atol=0.):
     """ Checks that actual and expected arrays or torch tensors are equal. """
-    # pylint: disable=no-self-use
     nt.assert_allclose(_np(actual), _np(expected), rtol=rtol, atol=atol)

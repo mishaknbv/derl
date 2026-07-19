@@ -30,7 +30,7 @@ def huber_loss(predictions, targets, weights=None):
   """ Huber loss with weights for each element in batch. """
   if weights is None:
     return F.smooth_l1_loss(predictions, targets)
-  losses = F.smooth_l1_loss(predictions, targets, reduction=None)
+  losses = F.smooth_l1_loss(predictions, targets, reduction='none')
   return torch.mean(weights * losses)
 
 

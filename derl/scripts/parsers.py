@@ -42,7 +42,7 @@ def log_args(args, logdir=None):
     logdir = args.logdir
   if not os.path.isdir(logdir):
     os.makedirs(logdir, exist_ok=True)
-  with open(os.path.join(logdir, "args.txt"), 'w') as argsfile:
+  with open(os.path.join(logdir, "args.txt"), 'w', encoding="utf-8") as argsfile:
     for key, val in vars(args).items():
       argsfile.write(f"{key}: {val}\n")
   return args

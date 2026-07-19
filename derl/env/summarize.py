@@ -2,7 +2,7 @@
 from collections import deque
 from gym import Wrapper
 import numpy as np
-import derl.summary as summary
+from derl import summary
 
 
 class RewardSummarizer:

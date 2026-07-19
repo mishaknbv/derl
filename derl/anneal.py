@@ -2,7 +2,7 @@
 from abc import ABC, abstractmethod
 import re
 import torch
-import derl.summary as summary
+from derl import summary
 
 
 def camel2snake(string):

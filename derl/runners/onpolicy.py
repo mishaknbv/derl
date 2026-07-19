@@ -22,9 +22,9 @@ class TransformInteractions(RunnerWrapper):
                                interactions.items()):
           try:
             interactions[key] = np.asarray(val)
-          except ValueError:
+          except ValueError as e:
             raise ValueError(
-                f"cannot convert value under key '{key}' to np.ndarray")
+                f"cannot convert value under key '{key}' to np.ndarray") from e
       for transform in self.transforms:
         transform(interactions)
       yield interactions

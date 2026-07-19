@@ -1,7 +1,7 @@
 """ Implements Actor-Critic algorithm. """
 import torch
 from derl.alg.common import Loss, Alg, r_squared
-import derl.summary as summary
+from derl import summary
 
 
 class A2CLoss(Loss):

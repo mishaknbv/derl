@@ -1,6 +1,6 @@
 """ Implements runner wrapper that enables/disables summaries. """
 from derl.runners.env_runner import RunnerWrapper
-import derl.summary as summary
+from derl import summary
 
 
 class PeriodicSummaries(RunnerWrapper):

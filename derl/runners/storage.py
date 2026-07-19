@@ -5,11 +5,10 @@ import numpy as np
 from derl.runners.sum_tree import SumTree
 
 
-def maybe_numpy(data):
+def recast_numpy(data):
   """ Tries to cast data to np.ndarray. """
-  if isinstance(data, (list, tuple)) and not data:
-    return np.array(data)
-  return np.array(list(data)) if isinstance(data[0], np.ndarray) else data
+  return (np.array(list(data)).astype(data[0].dtype)
+          if hasattr(data[0], "dtype") else data)
 
 
 class InteractionArrays:
@@ -21,22 +20,18 @@ class InteractionArrays:
     self.rewards = np.empty(self.size, dtype=np.float32)
     self.resets = np.empty(self.size, dtype=bool)
 
-  def get(self, indices, nstep, next_observations=True):
+  def get(self, indices, nstep):
     """ Returns `nstep` interactions starting from indices `indices`. """
-    # pylint: disable=misplaced-comparison-constant
     nstep_indices = (
         (indices[:, None] + np.arange(nstep)[None]) % self.size)
     next_indices = (indices + nstep) % self.size
     result = {
-        "observations": maybe_numpy(self.observations[indices]),
-        "actions": maybe_numpy(self.actions[indices]),
+        "observations": recast_numpy(self.observations[indices]),
+        "actions": recast_numpy(self.actions[indices]),
         "rewards": self.rewards[nstep_indices],
         "resets": self.resets[nstep_indices],
-        "next_observations": self.observations[next_indices],
+        "next_observations": recast_numpy(self.observations[next_indices]),
     }
-    if next_observations:
-      next_indices = (indices + nstep) % self.size
-      result["next_observations"] = maybe_numpy(self.observations[next_indices])
     return result
 
   def set(self, indices, observations, actions, rewards, resets):
@@ -67,15 +62,13 @@ class InteractionStorage:
 
   def get(self, indices):
     """ Returns `nstep` interactions starting from indices `indices`. """
-    # pylint: disable=misplaced-comparison-constant
     if indices.size and not np.all((0 <= indices) & (indices < self.size)):
       raise ValueError(f"indices out of range(0, {self.size}): {indices}")
-    result = self.arrays.get(indices, self.nstep,
-                             next_observations=not self.store_next_observations)
+    result = self.arrays.get(indices, self.nstep)
     if self.store_next_observations:
       result["observations"], result["next_observations"] = map(
-          maybe_numpy, (list(map(itemgetter(0), result["observations"])),
-                        list(map(itemgetter(1), result["observations"])))
+          recast_numpy, (list(map(itemgetter(0), result["observations"])),
+                         list(map(itemgetter(1), result["observations"])))
       )
     return result
 

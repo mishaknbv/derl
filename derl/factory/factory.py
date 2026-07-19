@@ -10,6 +10,9 @@ class KwargsDict:
     self.kwargs = kwargs
     self.unused = set(self.kwargs)
 
+  def __str__(self):
+    return str(self.kwargs)
+
   def has_arg(self, key):
     """ Return true if this kwargs dict has key. """
     self.unused.discard(key)
