@@ -35,13 +35,8 @@ class EpsilonGreedyPolicyTest(TorchTestCase):
     self.assertEqual(list(act.keys()), ["actions"])
     self.assertEqual(act["actions"], expected)
 
-  def test_categorical_model(self):
-    model = NatureCNNModel(8, nbins=10)
-    policy = EpsilonGreedyPolicy.categorical(model, epsilon=0)
-    self.act_check(policy, np.array(5))
-
   def test_quantile_model(self):
-    model = NatureCNNModel(8, nbins=10)
+    model = NatureCNNModel(8, num_quantiles=10)
     policy = EpsilonGreedyPolicy.quantile(model, epsilon=0)
     self.act_check(policy, np.array(5))
 

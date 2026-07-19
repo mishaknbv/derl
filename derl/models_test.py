@@ -83,9 +83,9 @@ class NatureCNNForActorCriticTest(TorchTestCase):
 
 class NatureCNNForDistributionalRLTest(TorchTestCase):
   def test_output_shape(self):
-    dqn = NatureCNNModel(output_units=6, nbins=51)
+    dqn = NatureCNNModel(output_units=6, num_quantiles=200)
     outputs = dqn(torch.rand(32, 84, 84, 4))
-    self.assertEqual(outputs.shape, torch.Size([32, 6, 51]))
+    self.assertEqual(outputs.shape, torch.Size([32, 6, 200]))
 
 
 class MuJoCoModelTest(TorchTestCase):

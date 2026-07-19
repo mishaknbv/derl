@@ -184,19 +184,19 @@ class NatureCNNModel(nn.Module):
                input_shape=(84, 84, 4),
                noisy=False,
                dueling=False,
-               nbins=None,
+               num_quantiles=None,
                init_fn=orthogonal_init):
     super().__init__()
     self.dueling = dueling
-    self.nbins = nbins
+    self.num_quantiles = num_quantiles
     self.single_output = not isinstance(output_units, (list, tuple))
     self.output_units = ([output_units] if self.single_output
                          else list(output_units))
 
-    if nbins is not None:
-      self.output_units[0] *= nbins
+    if num_quantiles is not None:
+      self.output_units[0] *= num_quantiles
     if dueling:
-      self.output_units.append(nbins or 1)
+      self.output_units.append(num_quantiles or 1)
 
     self.base = NatureCNNBase(input_shape, noisy=noisy)
     in_units = list(self.base.children())[-1].out_features
@@ -215,15 +215,15 @@ class NatureCNNModel(nn.Module):
     observations, = inputs
     base_outputs = self.base(observations)
     outputs = [layer(base_outputs) for layer in self.output_layers]
-    if self.nbins is not None:
-      nactions = self.output_units[0] // self.nbins
-      outputs[0] = torch.reshape(outputs[0], (-1, nactions, self.nbins))
+    if self.num_quantiles is not None:
+      nactions = self.output_units[0] // self.num_quantiles
+      outputs[0] = torch.reshape(outputs[0], (-1, nactions, self.num_quantiles))
     if self.dueling:
-      advantages, values = outputs[0], outputs.pop()
+      advantages, values = outputs
       values = torch.reshape(
-          values, (-1, 1, self.nbins) if self.nbins is not None else (-1, 1))
-      outputs[0] = (values + advantages
-                    - torch.mean(advantages, 1, keepdims=True))
+          values, (-1, 1, self.num_quantiles) if self.num_quantiles is not None else (-1, 1))
+      outputs = [(values + advantages
+                  - torch.mean(advantages, 1, keepdims=True))]
     if self.single_output:
       outputs = outputs[0]
     return outputs

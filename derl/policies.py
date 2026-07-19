@@ -10,15 +10,15 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 
 class Policy(ABC):
   """ RL policy (typically wraps a torch.nn.Module).  """
-  def is_recurrent(self): # pylint: disable=no-self-use
+  def is_recurrent(self):
     """ Returns true if policy is recurrent. """
     return False
 
-  def get_state(self): # pylint: disable=no-self-use
+  def get_state(self):
     """ Returns current policy state. """
     return None
 
-  def reset(self): # pylint: disable=no-self-use
+  def reset(self):
     """ Resets the state. """
 
   @abstractmethod
@@ -127,7 +127,8 @@ class EpsilonGreedyPolicy(Policy):
     self.epsilon = epsilon
     self.nactions = nactions
     if qvalues_from_preds is None:
-      qvalues_from_preds = lambda x: x
+      def qvalues_from_preds(preds):
+        return preds
     self.qvalues_from_preds = qvalues_from_preds
 
   @classmethod
