@@ -36,7 +36,7 @@ class EnvRunner:
   def run(self, obs=None):
     """ Interacts with the environment starting from obs for horizon steps. """
     if obs is None:
-      obs = self.env.reset()
+      obs, _ = self.env.reset()
       self.episode_length = 0
     while not self.is_exhausted():
       interactions = defaultdict(list)
@@ -48,18 +48,19 @@ class EnvRunner:
                            f"but has keys {list(act.keys())}")
         for key, val in act.items():
           interactions[key].append(val)
-        new_obs, rew, done, info = self.env.step(act["actions"])
+        new_obs, rew, terminated, truncated, info = self.env.step(act["actions"])
         self.episode_length += 1
         interactions["rewards"].append(rew)
-        interactions["resets"].append(done)
+        interactions["terminated"].append(terminated)
+        interactions["truncated"].append(truncated)
         interactions["infos"].append(info)
         interactions["next_observations"].append(new_obs)
 
         # Note that batched envs should auto-reset, hence we only check
         # done flag if the env is not batched.
         if self.nenvs is None and (
-            done or self.episode_length == self.time_limit):
-          obs = self.env.reset()
+            terminated or truncated or self.episode_length == self.time_limit):
+          obs, _ = self.env.reset()
           self.episode_length = 0
         else:
           obs = new_obs

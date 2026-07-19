@@ -1,7 +1,7 @@
 # pylint: skip-file
 from multiprocessing import Process, Pipe
 
-from gym import Env, Wrapper, Space
+from gymnasium import Env, Wrapper, Space
 import numpy as np
 
 
@@ -80,7 +80,8 @@ class EnvBatch(Env):
     return np.stack(obs), np.stack(rews), np.stack(resets), infos
 
   def reset(self):
-    return np.stack([env.reset() for env in self.envs])
+    obs, infos = list(zip(*[env.reset() for env in self.envs]))
+    return obs, infos
 
 
 class SingleEnvBatch(Wrapper, EnvBatch):
@@ -105,29 +106,34 @@ class SingleEnvBatch(Wrapper, EnvBatch):
     return ob[None], np.expand_dims(rew, 0), np.expand_dims(done, 0), [info]
 
   def reset(self):
-    return self.env.reset()[None]
+    obs, info = self.env.reset()
+    return obs[None], [info]
 
 
-def worker(parent_connection, worker_connection, make_env_function,
-           send_spaces=True):
+def worker(connection, make_env_function,
+           send_spaces=True, **make_env_kwargs):
   # Adapted from SubprocVecEnv github.com/openai/baselines
-  parent_connection.close()
-  env = make_env_function()
+  env = make_env_function(**make_env_kwargs)
   if send_spaces:
-    worker_connection.send((env.observation_space, env.action_space))
+    connection.send((env.observation_space, env.action_space))
   while True:
-    cmd, action = worker_connection.recv()
+    try:
+      cmd, args = connection.recv()
+    except EOFError:
+      return
     if cmd == "step":
-      ob, rew, done, info = env.step(action)
-      if done:
-        ob = env.reset()
-      worker_connection.send((ob, rew, done, info))
+      action = args
+      ob, rew, terminated, truncated, info = env.step(action)
+      if terminated or truncated:
+        ob, _ = env.reset()
+      connection.send((ob, rew, terminated, truncated, info))
     elif cmd == "reset":
-      ob = env.reset()
-      worker_connection.send(ob)
+      kwargs = args
+      ob, info = env.reset()
+      connection.send((ob, info))
     elif cmd == "close":
       env.close()
-      worker_connection.close()
+      connection.close()
       break
     else:
       raise NotImplementedError("Unknown command %s" % cmd)
@@ -137,29 +143,29 @@ class ParallelEnvBatch(EnvBatch):
   """
   An abstract batch of environments.
   """
-  def __init__(self, make_env, nenvs=None):
-    make_env_functions = self._get_make_env_functions(make_env, nenvs)
-    self._nenvs = len(make_env_functions)
+  def __init__(self, make_env, make_env_kwargs, nenvs=None):
+    if not isinstance(make_env_kwargs, (tuple, list, np.ndarray)):
+      if nenvs is not None:
+        raise ValueError("when make_env_kwargs is not an instance of "
+                         "(tuple, list, np.ndarray) nenvs must not be None")
+      make_env_kwargs = [make_env_kwargs for _ in range(nenvs)]
+    self._nenvs = nenvs if nenvs is not None else len(make_env_kwargs)
     self._parent_connections, self._worker_connections = zip(*[
       Pipe() for _ in range(self._nenvs)
     ])
     self._processes = [
         Process(
           target=worker,
-          args=(parent_connection, worker_connection, make_env),
+          args=(connection, make_env),
+          kwargs=kwargs,
           daemon=True
         )
-        for i, (parent_connection, worker_connection, make_env)
-        in enumerate(zip(self._parent_connections,
-                         self._worker_connections,
-                         make_env_functions))
+        for connection, kwargs
+        in zip(self._worker_connections, make_env_kwargs)
     ]
     for p in self._processes:
       p.start()
     self._closed = False
-
-    for conn in self._worker_connections:
-      conn.close()
 
     observation_spaces, action_spaces = [], []
     for conn in self._parent_connections:
@@ -178,13 +184,17 @@ class ParallelEnvBatch(EnvBatch):
     for conn, a in zip(self._parent_connections, actions):
       conn.send(("step", a))
     results = [conn.recv() for conn in self._parent_connections]
-    obs, rews, dones, infos = zip(*results)
-    return np.stack(obs), np.stack(rews), np.stack(dones), infos
+    obs, rews, terminations, truncations, infos = zip(*results)
+    return (np.stack(obs), np.stack(rews),
+            np.stack(terminations), np.stack(truncations),
+            infos)
 
-  def reset(self):
+  def reset(self, **kwargs):
     for conn in self._parent_connections:
-      conn.send(("reset", None))
-    return np.stack([conn.recv() for conn in self._parent_connections])
+      conn.send(("reset", kwargs))
+    results = [conn.recv() for conn in self._parent_connections]
+    obs, infos = zip(*results)
+    return np.stack(obs), infos
 
   def close(self):
     if self._closed:

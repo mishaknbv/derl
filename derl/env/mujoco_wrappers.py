@@ -1,7 +1,7 @@
 """ MuJoCo env wrappers. """
 # Normalize wrapper is adapted from https://github.com/openai/baselines
 from copy import deepcopy
-import gym
+import gymnasium as gym
 import numpy as np
 
 
@@ -66,7 +66,6 @@ class Normalize(gym.Wrapper):
   A vectorized wrapper that normalizes the observations
   and returns from an environment.
   """
-  # pylint: disable=too-many-arguments
   def __init__(self, env, obs=True, ret=True,
                clipobs=10., cliprew=10., gamma=0.99, eps=1e-8):
     super().__init__(env)
@@ -108,20 +107,20 @@ class Normalize(gym.Wrapper):
     return obs
 
   def step(self, action):
-    obs, rews, resets, info = self.env.step(action)
+    obs, rews, terminated, truncated, info = self.env.step(action)
     self.ret = self.ret * self.gamma + rews
     obs = self.observation(obs)
     if self.ret_rmv:
       self.ret_rmv.update(self.ret)
       rews = np.clip(rews / np.sqrt(self.ret_rmv.var + self.eps),
                      -self.cliprew, self.cliprew)
-    self.ret[resets] = 0.
-    return obs, rews, resets, info
+    self.ret[terminated] = 0.
+    return obs, rews, terminated, truncated, info
 
   def reset(self, **kwargs):
     self.ret = np.zeros(getattr(self.env.unwrapped, "nenvs", 1))
-    obs = self.env.reset(**kwargs)
-    return self.observation(obs)
+    obs, info = self.env.reset(**kwargs)
+    return self.observation(obs), info
 
 
 class TanhRangeActions(gym.ActionWrapper):
@@ -141,5 +140,6 @@ class TanhRangeActions(gym.ActionWrapper):
     return (high - low) / 2 * action + (high + low) / 2
 
   def reverse_action(self, action):
+    """ Reverses transform of the action. """
     low, high = self.env.action_space.low, self.env.action_space.high
     return (2 * action - (high + low)) / (high - low)

@@ -3,10 +3,10 @@ from functools import partial, wraps
 from contextlib import contextmanager
 from itertools import chain, tee
 from math import floor
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
-import torch.nn as nn
+from torch import nn
 from derl.env.env_batch import SpaceBatch
 
 
@@ -207,7 +207,7 @@ class NatureCNNModel(nn.Module):
     self.init_fn = init_fn
     if self.init_fn:
       self.apply(self.init_fn)
-    self.to("cuda" if torch.cuda.is_available() else "cpu")
+    self.to(get_device())
 
   @broadcast_inputs(ndims=4)
   def forward(self, *inputs):
@@ -271,7 +271,7 @@ class MuJoCoModel(nn.Module):
                          and len(outputs) == 2)
     self.logstd = (nn.Parameter(torch.zeros(output_units[0]))
                    if not logstd_from_mlp else None)
-    self.to("cuda" if torch.cuda.is_available() else "cpu")
+    self.to(get_device())
 
   @broadcast_inputs(ndims=2)
   @collocate_inputs()
@@ -349,7 +349,7 @@ class ContinuousQValueModel(nn.Module):
     self.init_fn = init_fn
     if self.init_fn is not None:
       self.apply(self.init_fn)
-    self.to("cuda" if torch.cuda.is_available() else "cpu")
+    self.to(get_device())
 
   @broadcast_inputs(ndims=2)
   @collocate_inputs()

@@ -155,7 +155,7 @@ class PrioritizedStorage(InteractionStorage):
     newindex = super().add(observation, action, reward, done)
     self.pending_indices.append(newindex)
 
-    indices, priorities = [newindex], [0]
+    indices, priorities = [newindex], [0.]
     if index is not None:
       indices.append(index)
       priorities.append(self.start_max_priority)

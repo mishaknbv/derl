@@ -2,9 +2,9 @@
 from collections import deque
 
 import cv2
-import gym
-import gym.spaces as spaces
-from gym.envs import atari
+import gymnasium as gym
+from gymnasium import spaces
+import ale_py
 import numpy as np
 cv2.ocl.setUseOpenCL(False)
 
@@ -12,27 +12,27 @@ cv2.ocl.setUseOpenCL(False)
 class EpisodicLife(gym.Wrapper):
   """ Sets done flag to true when agent dies. """
   def __init__(self, env):
-    super(EpisodicLife, self).__init__(env)
+    super().__init__(env)
     self.lives = 0
     self.real_done = True
 
   def step(self, action):
-    obs, rew, done, info = self.env.step(action)
-    self.real_done = done
-    info["real_done"] = done
+    obs, rew, terminated, truncated, info = self.env.step(action)
+    self.real_done = terminated
+    info["real_done"] = terminated
     lives = self.env.unwrapped.ale.lives()
     if 0 < lives < self.lives:
-      done = True
+      terminated = True
     self.lives = lives
-    return obs, rew, done, info
+    return obs, rew, terminated, truncated, info
 
   def reset(self, **kwargs):
     if self.real_done:
-      obs = self.env.reset(**kwargs)
+      obs, info = self.env.reset(**kwargs)
     else:
-      obs, _, _, _ = self.env.step(0)
+      obs, _, _, _, info = self.env.step(0)
     self.lives = self.env.unwrapped.ale.lives()
-    return obs
+    return obs, info
 
 
 class FireReset(gym.Wrapper):
@@ -42,7 +42,7 @@ class FireReset(gym.Wrapper):
   this wrapper makes this action so that the epsiode starts automatically.
   """
   def __init__(self, env):
-    super(FireReset, self).__init__(env)
+    super().__init__(env)
     action_meanings = env.unwrapped.get_action_meanings()
     if len(action_meanings) < 3:
       raise ValueError(
@@ -58,44 +58,44 @@ class FireReset(gym.Wrapper):
 
   def reset(self, **kwargs):
     self.env.reset(**kwargs)
-    obs, _, done, _ = self.env.step(1)
-    if done:
+    obs, _, terminated, truncated, _ = self.env.step(1)
+    if terminated or truncated:
       self.env.reset(**kwargs)
-    obs, _, done, _ = self.env.step(2)
-    if done:
+    obs, _, terminated, truncated, info = self.env.step(2)
+    if terminated or truncated:
       self.env.reset(**kwargs)
-    return obs
+    return obs, info
 
 
 class StartWithRandomActions(gym.Wrapper):
   """ Makes random number of random actions at the beginning of each
   episode. """
   def __init__(self, env, max_random_actions=30):
-    super(StartWithRandomActions, self).__init__(env)
+    super().__init__(env)
     self.max_random_actions = max_random_actions
     self.real_done = True
 
   def step(self, action):
-    obs, rew, done, info = self.env.step(action)
+    obs, rew, terminated, truncated, info = self.env.step(action)
     self.real_done = info.get("real_done", True)
-    return obs, rew, done, info
+    return obs, rew, terminated, truncated, info
 
   def reset(self, **kwargs):
-    obs = self.env.reset(**kwargs)
+    obs, info = self.env.reset(**kwargs)
     if self.real_done:
-      num_random_actions = self.env.action_space.np_random.randint(
+      num_random_actions = self.env.action_space.np_random.integers(
           self.max_random_actions + 1)
       for _ in range(num_random_actions):
         action = self.env.action_space.sample()
-        obs, _, _, _ = self.env.step(action)
+        obs, _, _, _, info = self.env.step(action)
       self.real_done = False
-    return obs
+    return obs, info
 
 
 class ImagePreprocessing(gym.ObservationWrapper):
   """ Preprocesses image-observations by possibly grayscaling and resizing. """
   def __init__(self, env, width=84, height=84, grayscale=True):
-    super(ImagePreprocessing, self).__init__(env)
+    super().__init__(env)
     self.width = width
     self.height = height
     self.grayscale = grayscale
@@ -121,10 +121,10 @@ class ImagePreprocessing(gym.ObservationWrapper):
 class MaxBetweenFrames(gym.ObservationWrapper):
   """ Takes maximum between two subsequent frames. """
   def __init__(self, env):
-    if (isinstance(env.unwrapped, atari.AtariEnv) and
+    if (isinstance(env.unwrapped, ale_py.env.AtariEnv) and
         "NoFrameskip" not in env.spec.id):
       raise ValueError("MaxBetweenFrames requires NoFrameskip in atari env id")
-    super(MaxBetweenFrames, self).__init__(env)
+    super().__init__(env)
     self.last_obs = None
 
   def observation(self, observation):
@@ -133,14 +133,14 @@ class MaxBetweenFrames(gym.ObservationWrapper):
     return obs
 
   def reset(self, **kwargs):
-    self.last_obs = self.env.reset(**kwargs)
-    return self.last_obs
+    self.last_obs, info = self.env.reset(**kwargs)
+    return self.last_obs, info
 
 
 class QueueFrames(gym.ObservationWrapper):
   """ Queues specified number of frames together. """
   def __init__(self, env, nframes=4, concat=False):
-    super(QueueFrames, self).__init__(env)
+    super().__init__(env)
     self.obs_queue = deque([], maxlen=nframes)
     self.concat = concat
     ospace = self.observation_space
@@ -157,18 +157,18 @@ class QueueFrames(gym.ObservationWrapper):
             else np.stack(self.obs_queue, -1))
 
   def reset(self, **kwargs):
-    obs = self.env.reset(**kwargs)
+    obs, info = self.env.reset(**kwargs)
     for _ in range(self.obs_queue.maxlen - 1):
       self.obs_queue.append(obs)
-    return self.observation(obs)
+    return self.observation(obs), info
 
 
 class SkipFrames(gym.Wrapper):
   """ Performs the same action for several steps and returns the final result.
   """
   def __init__(self, env, nskip=4):
-    super(SkipFrames, self).__init__(env)
-    if (isinstance(env.unwrapped, atari.AtariEnv) and
+    super().__init__(env)
+    if (isinstance(env.unwrapped, ale_py.env.AtariEnv) and
         "NoFrameskip" not in env.spec.id):
       raise ValueError("SkipFrames requires NoFrameskip in atari env id")
     self.nskip = nskip
@@ -176,11 +176,11 @@ class SkipFrames(gym.Wrapper):
   def step(self, action):
     total_reward = 0.0
     for _ in range(self.nskip):
-      obs, rew, done, info = self.env.step(action)
+      obs, rew, terminated, truncated, info = self.env.step(action)
       total_reward += rew
-      if done:
+      if terminated or truncated:
         break
-    return obs, total_reward, done, info
+    return obs, total_reward, terminated, truncated, info
 
   def reset(self, **kwargs):
     return self.env.reset(**kwargs)

@@ -1,11 +1,11 @@
 """ Creates environments with standard wrappers. """
-import gym
+import gymnasium as gym
 try:
   # Populates gym registry with pybullet envs
   import pybullet_envs   # pylint: disable=unused-import
 except ImportError:
   pass  # pylint: disable=bare-except
-from atari_py import list_games
+import ale_py
 from .atari_wrappers import (
     EpisodicLife,
     FireReset,
@@ -19,13 +19,22 @@ from .atari_wrappers import (
 from .env_batch import ParallelEnvBatch
 from .mujoco_wrappers import Normalize, TanhRangeActions
 from .summarize import Summarize
+gym.register_envs(ale_py)
 
 
 def list_envs(env_type):
   """ Returns list of envs ids of given type. """
+  impossible_roms = {"maze_craze", "joust", "warlords", "combat"}
+  all_atari_games = {
+      env_spec.kwargs["game"]
+      for env_spec in gym.registry.values()
+      if isinstance(env_spec.entry_point, str)
+      and "ale_py" in env_spec.entry_point
+      and env_spec.kwargs["game"] not in impossible_roms
+  }
   ids = {
       "atari": list("".join(c.capitalize() for c in g.split("_"))
-                    for g in list_games()),
+                    for g in all_atari_games),
       "mujoco": [
           "Reacher",
           "Pusher",
@@ -87,8 +96,7 @@ def get_seed(nenvs=None, seed=None):
 
 def set_seed(env, seed=None):
   """ Sets seed of a given env. """
-  env.seed(seed)
-  env.action_space.np_random.seed(seed)
+  env.action_space.seed(seed)
 
 
 def nature_dqn_env(env_id, nenvs=None, seed=None,
@@ -99,18 +107,22 @@ def nature_dqn_env(env_id, nenvs=None, seed=None,
     raise ValueError(f"env_id must have 'NoFrameskip' but is {env_id}")
   seed = get_seed(nenvs)
   if nenvs is not None:
-    env = ParallelEnvBatch([
-        lambda i=i, s=s: nature_dqn_env(
-            env_id, seed=s, summarize=False,
-            episodic_life=episodic_life, clip_reward=False)
-        for i, s in enumerate(seed)
-    ])
+    env = ParallelEnvBatch(
+      nature_dqn_env,
+      make_env_kwargs=[
+          dict(
+            env_id=env_id, seed=s, summarize=False,
+            episodic_life=episodic_life, clip_reward=False
+          ) for s in seed
+      ],
+    )
     if summarize:
       env = Summarize.reward_summarizer(env, prefix=env_id)
     if clip_reward:
       env = ClipReward(env)
     return env
 
+  ale_py.ALEInterface.setLoggerMode(ale_py.LoggerMode.Error)
   env = gym.make(env_id)
   set_seed(env, seed)
   return nature_dqn_wrap(env, summarize=summarize,
@@ -141,11 +153,17 @@ def mujoco_env(env_id, nenvs=None, seed=None, time_limit=True, **kwargs):
   assert is_mujoco_id(env_id)
   seed = get_seed(nenvs, seed)
   if nenvs is not None:
-    env = ParallelEnvBatch([
-        lambda s=s: mujoco_env(env_id, seed=s, time_limit=time_limit,
-                               summarize=False, normalize_obs=False,
-                               normalize_ret=False, tanh_range_actions=False)
-        for s in seed])
+    env = ParallelEnvBatch(
+        mujoco_env,
+        [
+          dict(seed=s,
+               time_limit=time_limit,
+               summarize=False,
+               normalize_obs=False,
+               normalize_ret=False,
+               tanh_range_actions=False,
+          ) for s in seed
+        ])
     return mujoco_wrap(env, **kwargs)
 
   env = gym.make(env_id)
@@ -167,19 +185,23 @@ def mujoco_wrap(env, summarize=True, normalize_obs=True, normalize_ret=True,
   return env
 
 
-def make(env_id, nenvs=None, seed=None, **kwargs):
+def make(env_id, nenvs=None, seed=None, summarize=True, **kwargs):
   """ Creates env with standard wrappers. """
   if is_atari_id(env_id):
-    return nature_dqn_env(env_id, nenvs, seed=seed, **kwargs)
+    return nature_dqn_env(env_id, nenvs, seed=seed,
+                          summarize=summarize, **kwargs)
   if is_mujoco_id(env_id):
-    return mujoco_env(env_id, nenvs, seed=seed, **kwargs)
+    return mujoco_env(env_id, nenvs, seed=seed,
+                      summarize=summarize, **kwargs)
 
   def _make(seed):
     env = gym.make(env_id, **kwargs)
+    if summarize:
+      env = Summarize.reward_summarizer(env, prefix=env_id)
     set_seed(env, seed)
     return env
 
   seed = get_seed(nenvs, seed)
   if nenvs is None:
     return _make(seed)
-  return ParallelEnvBatch([lambda s=s: _make(s) for s in seed])
+  return ParallelEnvBatch(_make, [dict(seed=s) for s in seed])

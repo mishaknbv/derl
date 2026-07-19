@@ -1,6 +1,6 @@
 """ Wrapper for writing summaries. """
 from collections import deque
-from gym import Wrapper
+from gymnasium import Wrapper
 import numpy as np
 from derl import summary
 
@@ -66,7 +66,7 @@ class RewardSummarizer:
 class Summarize(Wrapper):
   """ Writes env summaries."""
   def __init__(self, env, summarizer):
-    super(Summarize, self).__init__(env)
+    super().__init__(env)
     self.summarizer = summarizer
 
   @classmethod
@@ -79,15 +79,16 @@ class Summarize(Wrapper):
     return cls(env, summarizer)
 
   def step(self, action):
-    obs, rew, done, info = self.env.step(action)
+    obs, rew, terminated, truncated, info = self.env.step(action)
 
     info_collection = [info] if isinstance(info, dict) else info
-    done_collection = [done] if isinstance(done, bool) else done
+    done_collection = ([terminated] if isinstance(terminated, bool)
+                       else terminated)
     resets = np.asarray([info.get("real_done", done_collection[i])
                          for i, info in enumerate(info_collection)])
     self.summarizer.step(rew, resets)
 
-    return obs, rew, done, info
+    return obs, rew, terminated, truncated, info
 
   def reset(self, **kwargs):
     self.summarizer.reset()

@@ -34,12 +34,12 @@ class ExperienceReplay(RunnerWrapper):
       raise ValueError(f"storage has size {self.storage.size}, but "
                        "but initialization requires it to be empty")
     if obs is None:
-      obs = self.env.reset()
+      obs, _ = self.env.reset()
     for _ in range(self.storage_init_size):
       action = self.env.action_space.sample()
-      next_obs, rew, done, _ = self.env.step(action)
-      self.storage.add(obs, action, rew, done, next_obs)
-      obs = next_obs if not done else self.env.reset()
+      next_obs, rew, terminated, truncated, _ = self.env.step(action)
+      self.storage.add(obs, action, rew, terminated, next_obs)
+      obs = next_obs if not terminated | truncated else self.env.reset()[0]
     self.initialized_storage = True
     return obs
 
@@ -48,8 +48,9 @@ class ExperienceReplay(RunnerWrapper):
       obs = self.initialize_storage(obs=obs)
     for interactions in self.runner.run(obs=obs):
       interactions = {k: interactions[k] for k in
-                      ("observations", "actions", "rewards", "resets",
-                       "next_observations")}
+                      ("observations", "actions", "rewards",
+                       "terminated", "next_observations")}
+      interactions["resets"] = interactions.pop("terminated")
       self.storage.add_batch(**interactions)
       for anneal in self.anneals:
         if summary.should_record():
@@ -106,7 +107,8 @@ class PrioritizedExperienceReplay(ExperienceReplay):
 
   def run(self, obs=None):
     for interactions in super().run(obs=obs):
-      if not isinstance(self.beta, (float, int)):
+      beta = self.beta
+      if not isinstance(beta, (float, int)):
         beta = float(self.beta.numpy())
       log_weights = -beta * (
           np.log(self.storage.size) + interactions["log_probs"])
