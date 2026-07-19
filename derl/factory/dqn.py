@@ -16,6 +16,9 @@ class DQNFactory(Factory):
     return {
         "atari": {
             "num-train-steps": 200e6,
+            "no-distributional": dict(action="store_false",
+                                        dest="distributional"),
+            "num-quantiles": 200,
             "no-dueling": dict(action="store_false", dest="dueling"),
             "noisy": dict(action="store_true"),
             "exploration-epsilon-start": 1.,
@@ -23,7 +26,7 @@ class DQNFactory(Factory):
             "exploration-end-step": int(1e6),
             "storage-size": int(1e6),
             "storage-init-size": int(50e3),
-            "not-prioritized": dict(action="store_false", dest="prioritized"),
+            "no-prioritized": dict(action="store_false", dest="prioritized"),
             "per-alpha": 0.6,
             "per-beta": dict(type=float, default=(0.4, 1.), nargs=2),
             "steps-per-sample": 4,
@@ -42,7 +45,9 @@ class DQNFactory(Factory):
   def make_model(self, env, init_fn=None, **kwargs):
     """ Creates Nature-DQN model for a given env. """
     with self.override_context(**kwargs):
-      model_kwargs = self.get_arg_dict("noisy", "dueling", "nbins")
+      model_kwargs = self.get_arg_dict("noisy", "dueling", "num_quantiles")
+      if not self.get_arg("distributional"):
+        model_kwargs.pop("num_quantiles")
       return NatureCNNModel(input_shape=env.observation_space.shape,
                             output_units=env.action_space.n,
                             **model_kwargs,
@@ -64,13 +69,15 @@ class DQNFactory(Factory):
             name="exploration_epsilon")
         epsilon = epsilon_anneal.get_tensor()
         anneals.append(epsilon_anneal)
-      policy = EpsilonGreedyPolicy(model, epsilon)
+      policy = (EpsilonGreedyPolicy.quantile(model, epsilon)
+                if self.get_arg("distributional")
+                else EpsilonGreedyPolicy(model, epsilon))
       runner_kwargs = self.get_arg_dict("storage_size", "storage_init_size",
                                         "batch_size", "steps_per_sample",
                                         "nstep", "prioritized")
-      if self.has_arg("per_alpha"):
+      if self.has_arg("per_alpha") and self.get_arg("prioritized"):
         runner_kwargs["alpha"] = self.get_arg("per_alpha")
-      if self.has_arg("per_beta"):
+      if self.has_arg("per_beta") and self.get_arg("prioritized"):
         runner_kwargs["beta"] = self.get_arg("per_beta")
       runner = make_dqn_runner(env, policy, self.get_arg("num_train_steps"),
                                anneals=anneals, nlogs=nlogs, **runner_kwargs)

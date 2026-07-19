@@ -56,13 +56,17 @@ class DQNLoss(Loss):
     """
     if actions is None:
       with torch.no_grad():
-        qvalues = self.target_model(observations)
-        actions = torch.argmax(qvalues if not self.double
-                               else self.model(observations), -1)
+        outputs = self.target_model(observations)
+        qvalues = outputs if outputs.ndim == 2 else outputs.mean(-1)
+        if self.double:
+          model_outputs = self.model(observations)
+          qvalues = (model_outputs if model_outputs.ndim == 2
+                     else model_outputs.mean(-1))
+        actions = torch.argmax(qvalues, -1)
     else:
-      qvalues = self.model(observations)
-    qvalues = torch.gather(qvalues, 1, actions[:, None]).squeeze(1)
-    return qvalues
+      outputs = self.model(observations)
+    outputs = outputs[torch.arange(outputs.shape[0]), actions]
+    return outputs
 
   def compute_targets(self, rewards, resets, next_obs):
     """ Computes target values. """
@@ -74,11 +78,9 @@ class DQNLoss(Loss):
       raise ValueError(
           "rewards, resets must have the same shapes, "
           f"got rewards.shape={rewards.shape}, resets.shape={resets.shape}")
-    target_shape = rewards.shape[:1] + rewards.shape[2:]
-    if tuple(targets.shape) != target_shape:
-      raise ValueError("making predictions when computing targets gives bad "
-                       f"shape {tuple(targets.shape)}, expected shape "
-                       f"{tuple(target_shape)}")
+    if targets.ndim == 2:
+      rewards = rewards[:, :, None]
+      resets = resets[:, :, None]
 
     for t in reversed(range(nsteps)):
       targets = rewards[:, t] + (1 - resets[:, t]) * self.gamma * targets
@@ -93,12 +95,31 @@ class DQNLoss(Loss):
     qtargets = self.compute_targets(rewards, resets, next_obs)
     qvalues = self.make_predictions(obs, actions)
     if "update_priorities" in data:
-      data["update_priorities"](
-          torch.abs(qtargets - qvalues).cpu().detach().numpy())
+      errors = qtargets - qvalues
+      if errors.ndim == 2:
+        errors = torch.abs(errors.mean(-1))
+      else:
+        errors = torch.abs(errors)
+      data["update_priorities"](errors.cpu().detach().numpy())
 
     weights = None
+    loss = None
     if "weights" in data:
       weights = self.torch_from_numpy(data["weights"])
+    if qtargets.ndim == 2:
+      batch_size, num_quantiles = qtargets.shape
+      if weights is None:
+        weights = torch.ones(batch_size).to(qtargets.device)
+      nbins = qtargets.shape[-1]
+      arange = torch.arange(nbins + 1).to(qtargets.device)
+      tau = 0.5 * arange[:-1] + 0.5 * arange[1:]
+      target_shape = torch.Size([batch_size, num_quantiles, num_quantiles])
+      qtargets = torch.broadcast_to(qtargets[:, :, None], target_shape)
+      qvalues = torch.broadcast_to(qvalues[:, None], target_shape)
+      weights = (
+        weights[:, None, None]
+        * torch.abs(tau - (qtargets < qvalues).detach().to(torch.float32))
+      )
     loss = huber_loss(qtargets, qvalues, weights=weights)
 
     if summary.should_record():
