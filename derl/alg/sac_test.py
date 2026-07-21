@@ -1,4 +1,5 @@
 # pylint: disable=missing-docstring
+from functools import partial
 import numpy as np
 from derl.alg.test import AlgTestCase
 from derl.alg.sac import SACLossTuple
@@ -17,7 +18,7 @@ def iter_sac_loss_tuple(loss):
     yield f"qvalue_losses_{i}", qvloss
 
 
-class SACPyBulletTest(AlgTestCase):
+class SACMuJoCoTest(AlgTestCase):
   def setUp(self):
     super().setUp()
 
@@ -27,13 +28,16 @@ class SACPyBulletTest(AlgTestCase):
     kwargs["batch_size"] = 4
     kwargs["steps_per_sample"] = 5
     kwargs["num_storage_samples"] = 2
-    self.env = make_env("HalfCheetahBulletEnv-v0", seed=0,
+    self.env = make_env("HalfCheetah-v5", seed=0,
                         normalize_obs=False, normalize_ret=False)
+    self.env.reset = partial(self.env.reset, seed=0)
     self.alg = SACFactory(**kwargs).make(self.env)
     self.alg.model.to("cpu")
+    self.alg.loss_fn.target_policy.model.to("cpu")
 
   def test_interactions(self):
-    self.assert_interactions("testdata/sac/pybullet/interactions.npz",
+    # self.save_interactions("testdata/sac/mujoco/interactions.npz")
+    self.assert_interactions("testdata/sac/mujoco/interactions.npz",
                              rtol=1e-6, atol=1e-6)
 
   def save_grad(self, fname):
@@ -43,7 +47,11 @@ class SACPyBulletTest(AlgTestCase):
     for field, lss in iter_sac_loss_tuple(loss):
       lss.backward()
       new_grads = {
-          f"{field}/grad_{i}": np.copy(param.grad.numpy())
+          f"{field}/grad_{i}": (
+            np.copy(param.grad.numpy())
+            if param.grad is not None
+            else None
+          )
           for i, param in enumerate(self.alg.model.parameters())
       }
       self.alg.model.zero_grad()
@@ -56,17 +64,20 @@ class SACPyBulletTest(AlgTestCase):
   def assert_grad(self, fname, rtol=1e-7, atol=0.):
     interactions = next(self.alg.runner.run())
     loss = self.alg.loss(interactions)
-    with np.load(fname) as expected:
+    with np.load(fname, allow_pickle=True) as expected:
       for field, lss in iter_sac_loss_tuple(loss):
         lss.backward()
         for i, param in enumerate(self.alg.model.parameters()):
           with self.subTest(field=field, grad_i=i):
-            self.assertAllClose(param.grad, expected[f"{field}/grad_{i}"],
-                                rtol=rtol, atol=atol)
+            if param.grad is None:
+              self.assertEqual(param.grad, expected[f"{field}/grad_{i}"])
+            else:
+              self.assertAllClose(param.grad, expected[f"{field}/grad_{i}"],
+                                  rtol=rtol, atol=atol)
         self.alg.model.zero_grad()
 
   def test_grad(self):
-    self.assert_grad("testdata/sac/pybullet/grads.npz", rtol=1e-5, atol=1e-5)
+    self.assert_grad("testdata/sac/mujoco/grads.npz", rtol=1e-5, atol=1e-5)
 
   def save_losses(self, filename, num_losses):
     data_iter = self.alg.runner.run()
@@ -89,4 +100,4 @@ class SACPyBulletTest(AlgTestCase):
                             expected[i], rtol=rtol, atol=atol)
 
   def test_losses(self):
-    self.assert_losses("testdata/sac/pybullet/losses.npy", rtol=1e-5, atol=1e-5)
+    self.assert_losses("testdata/sac/mujoco/losses.npy", rtol=1e-5, atol=1e-5)

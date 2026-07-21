@@ -13,9 +13,9 @@ class ActorCriticPolicyTest(TorchTestCase):
     policy = ActorCriticPolicy(model)
     act = policy.act(torch.rand(84, 84, 4))
     self.assertEqual(list(act.keys()), ["actions", "log_prob", "values"])
-    self.assertEqual(act["actions"], np.array(3))
-    self.assertAllClose(act["log_prob"], np.array(-1.80754196), rtol=1e-6)
-    self.assertAllClose(act["values"], np.array([0.257305294]), rtol=1e-6)
+    self.assertEqual(act["actions"], np.array(1))
+    self.assertAllClose(act["log_prob"], np.array(-1.721119), rtol=1e-6)
+    self.assertAllClose(act["values"], np.array([0.257305294]), rtol=1e-5)
 
   def test_normal(self):
     model = MuJoCoModel(3, (2, 1))

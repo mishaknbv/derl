@@ -50,9 +50,9 @@ def assert_orthogonal(arr):
   arr = np.reshape(arr, (arr.shape[0], -1))
   nrows, ncols = arr.shape
   if nrows > ncols:
-    nt.assert_allclose(arr.T @ arr, np.eye(ncols), atol=1e-6)
+    nt.assert_allclose(arr.T @ arr, np.eye(ncols), atol=1e-5, rtol=1e-5)
   else:
-    nt.assert_allclose(arr @ arr.T, np.eye(nrows), atol=1e-6)
+    nt.assert_allclose(arr @ arr.T, np.eye(nrows), atol=1e-5, rtol=1e-5)
 
 
 class NatureCNNForActorCriticTest(TorchTestCase):

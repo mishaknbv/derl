@@ -1,4 +1,5 @@
 # pylint: disable=missing-docstring
+from functools import partial
 import torch
 from derl.alg.test import AlgTestCase
 from derl.env.make_env import make as make_env
@@ -28,7 +29,7 @@ class PPOAtariTest(AlgTestCase):
     self.assert_losses("testdata/ppo/atari/losses.npy", rtol=1e-5, atol=1e-5)
 
 
-class PPOPyBulletTest(AlgTestCase):
+class PPOMuJoCoTest(AlgTestCase):
   def setUp(self):
     super().setUp()
 
@@ -37,17 +38,18 @@ class PPOPyBulletTest(AlgTestCase):
     kwargs["num_runner_steps"] = 12
     kwargs["num_minibatches"] = 2
     kwargs["num_epochs"] = 3
-    self.env = make_env("HalfCheetahBulletEnv-v0",
+    self.env = make_env("HalfCheetah-v5",
                         nenvs=kwargs.get("nenvs"), seed=0)
+    self.env.reset = partial(self.env.reset, seed=0)
     self.alg = PPOFactory(**kwargs).make(self.env)
     self.alg.model.to("cpu")
 
   def test_interactions(self):
-    self.assert_interactions("testdata/ppo/pybullet/interactions.npz",
+    self.assert_interactions("testdata/ppo/mujoco/interactions.npz",
                              rtol=0, atol=1e-4)
 
   def test_grad(self):
-    self.assert_grad("testdata/ppo/pybullet/grads.npz", rtol=1e-5, atol=1e-5)
+    self.assert_grad("testdata/ppo/mujoco/grads.npz", rtol=1e-5, atol=1e-5)
 
   def test_losses(self):
-    self.assert_losses("testdata/ppo/pybullet/losses.npy", rtol=1e-5, atol=1e-5)
+    self.assert_losses("testdata/ppo/mujoco/losses.npy", rtol=1e-5, atol=1e-5)
