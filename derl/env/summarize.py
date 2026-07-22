@@ -53,7 +53,7 @@ class RewardSummarizer:
   def reset(self):
     """ Resets the reward summarizer. """
     for i, queue in enumerate(self.reward_queues):
-      if self.episode_lengths[i]:
+      if not self.had_ended_episodes[i]:
         queue.append(self.rewards[i])
         self.rewards[i] = 0
         self.had_ended_episodes[i] = True
@@ -82,8 +82,8 @@ class Summarize(Wrapper):
     obs, rew, terminated, truncated, info = self.env.step(action)
 
     info_collection = [info] if isinstance(info, dict) else info
-    done_collection = ([terminated] if isinstance(terminated, bool)
-                       else terminated)
+    done_collection = ([terminated | truncated] if isinstance(terminated, bool)
+                       else terminated | truncated)
     resets = np.asarray([info.get("real_done", done_collection[i])
                          for i, info in enumerate(info_collection)])
     self.summarizer.step(rew, resets)
