@@ -6,6 +6,7 @@ from .env_batch import (
     ParallelEnvBatch
 )
 from .atari_wrappers import (
+    ObservationVideo,
     EpisodicLife,
     FireReset,
     StartWithRandomActions,

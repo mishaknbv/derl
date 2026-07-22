@@ -23,6 +23,7 @@ class A2CFactory(Factory):
         "atari": {
             "nenvs": 8,
             "num-train-steps": 10e6,
+            "num-recordings": 10,
             "num-runner-steps": 5,
             "gamma": 0.99,
             "lambda_": 1.,

@@ -1,6 +1,7 @@
 """ Code to construct different objects. """
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
+from derl.env.make_env import is_atari_id
 from derl.scripts.parsers import get_defaults_parser
 
 
@@ -73,10 +74,13 @@ class Factory(ABC):
   def get_parser_defaults(args_type="atari"):
     """ Returns default argument dictionary for argument parsing. """
 
-  @staticmethod
-  def make_env_kwargs(env_id):
+  def make_env_kwargs(self, env_id):
     """ Returns keyword arguments for derl.env.make function. """
-    _ = env_id
+    recording_period = (
+        self.get_arg("num_train_steps") // self.get_arg("num_recordings") + 1
+    )
+    if is_atari_id(env_id):
+      return dict(recording_period=recording_period)
     return {}
 
   @classmethod

@@ -1,12 +1,57 @@
 """ Atari env wrappers. """
 from collections import deque
+import sys
+import threading
 
 import cv2
 import gymnasium as gym
 from gymnasium import spaces
 import ale_py
 import numpy as np
+import torch
+from derl import summary
 cv2.ocl.setUseOpenCL(False)
+
+
+class ObservationVideo(gym.Wrapper):
+  """ Records the interactions and saves them as a video. """
+  def __init__(self, env, recording_period, fps=25, multithread=True):
+    super().__init__(env)
+    self.recording_period = recording_period
+    self.fps = fps
+    self.multithread = multithread
+    self.step_count = 0
+    self.last_recording = -sys.maxsize
+    self.obs_list = []
+
+  @classmethod
+  def make(cls, env, nlogs, nsteps):
+    """ Creates an instance that will write nlogs over nsteps. """
+    return cls(env, nsteps // nlogs + 1)
+
+  def save_video(self, frames=None):
+    """ Saves the video of the last frames. """
+    if frames is None:
+      frames = self.obs_list
+    frames = torch.tensor(np.asarray(frames)).permute(0, 3, 1, 2).unsqueeze(0)
+    summary.add_video(self.env.spec.id, frames,
+                      fps=self.fps, global_step=self.step_count)
+
+  def step(self, action):
+    obs, rew, terminated, truncated, info = self.env.step(action)
+    self.obs_list.append(obs)
+    if (info.get("real_done", terminated or truncated)
+        and self.step_count - self.last_recording >= self.recording_period):
+      if self.multithread:
+        threading.Thread(target=self.save_video,
+                         args=(self.obs_list[:],), daemon=True).start()
+      else:
+        self.save_video()
+      self.last_recording = self.step_count
+    if terminated or truncated:
+      self.obs_list.clear()
+    self.step_count += 1
+    return obs, rew, terminated, truncated, info
 
 
 class EpisodicLife(gym.Wrapper):

@@ -27,10 +27,11 @@ def main():
 
   kwargs = vars(args)
   derl.summary.make_writer(args.logdir)
+  factory = factory_class(ignore_unused=("env_id", "nenvs", "logdir", "nlogs"),
+                          **kwargs)
   env = derl.env.make(args.env_id, kwargs.get("nenvs"), kwargs.get("seed"),
-                      **factory_class.make_env_kwargs(args.env_id))
-  alg = factory_class(ignore_unused=("env_id", "nenvs", "logdir", "nlogs"),
-                      **kwargs).make(env, nlogs=args.nlogs)
+                      **factory.make_env_kwargs(args.env_id))
+  alg = factory.make(env, nlogs=args.nlogs)
   alg.learn()
 
 

@@ -7,6 +7,7 @@ except ImportError:
   pass  # pylint: disable=bare-except
 import ale_py
 from .atari_wrappers import (
+    ObservationVideo,
     EpisodicLife,
     FireReset,
     StartWithRandomActions,
@@ -99,7 +100,7 @@ def set_seed(env, seed=None):
   env.action_space.seed(seed)
 
 
-def nature_dqn_env(env_id, nenvs=None, seed=None,
+def nature_dqn_env(env_id, nenvs=None, seed=None, recording_period=None,
                    summarize=True, episodic_life=True, clip_reward=True):
   """ Wraps env as in Nature DQN paper. """
   assert is_atari_id(env_id)
@@ -111,8 +112,8 @@ def nature_dqn_env(env_id, nenvs=None, seed=None,
       nature_dqn_env,
       make_env_kwargs=[
           dict(
-            env_id=env_id, seed=s, summarize=False,
-            episodic_life=episodic_life, clip_reward=False
+            env_id=env_id, seed=s, recording_period=recording_period,
+            summarize=False, episodic_life=episodic_life, clip_reward=False
           ) for s in seed
       ],
     )
@@ -125,13 +126,18 @@ def nature_dqn_env(env_id, nenvs=None, seed=None,
   ale_py.ALEInterface.setLoggerMode(ale_py.LoggerMode.Error)
   env = gym.make(env_id)
   set_seed(env, seed)
-  return nature_dqn_wrap(env, summarize=summarize,
+  return nature_dqn_wrap(env,
+                         recording_period=recording_period,
+                         summarize=summarize,
                          episodic_life=episodic_life,
                          clip_reward=clip_reward)
 
 
-def nature_dqn_wrap(env, summarize=True, episodic_life=True, clip_reward=True):
+def nature_dqn_wrap(env, recording_period=None, summarize=True,
+                    episodic_life=True, clip_reward=True):
   """ Wraps given env as in nature DQN paper. """
+  if recording_period is not None:
+    env = ObservationVideo(env, recording_period)
   if summarize:
     env = Summarize.reward_summarizer(env)
   if episodic_life:

@@ -19,6 +19,7 @@ class PPOFactory(Factory):
     defaults = {
         "atari": {
             "num-train-steps": 10e6,
+            "num-recordings": 1000,
             "nenvs": 8,
             "num-runner-steps": 128,
             "gamma": 0.99,

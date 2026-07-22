@@ -31,8 +31,7 @@ class SACFactory(Factory):
         }
     }.get(args_type)
 
-  @staticmethod
-  def make_env_kwargs(env_id):
+  def make_env_kwargs(self, env_id):
     _ = env_id
     return dict(time_limit=False, normalize_obs=False,
                 normalize_ret=False, tanh_range_actions=True)

@@ -16,11 +16,12 @@ class DQNFactory(Factory):
     return {
         "atari": {
             "num-train-steps": 200e6,
+            "num-recordings": 200,
             "no-distributional": dict(action="store_false",
-                                        dest="distributional"),
+                                      dest="distributional"),
             "num-quantiles": 200,
             "no-dueling": dict(action="store_false", dest="dueling"),
-            "noisy": dict(action="store_true"),
+            "no-noisy": dict(action="store_false", dest="noisy"),
             "exploration-epsilon-start": 1.,
             "exploration-epsilon-end": 0.01,
             "exploration-end-step": int(1e6),
@@ -36,6 +37,7 @@ class DQNFactory(Factory):
             "optimizer-decay": 0.95,
             "optimizer-momentum": 0.,
             "optimizer-epsilon": 0.01,
+            "max-grad-norm": 100.,
             "gamma": 0.99,
             "target-update-period": int(10e3),
             "no-double": dict(action="store_false", dest="double"),
@@ -61,12 +63,13 @@ class DQNFactory(Factory):
                                dueling=self.get_arg_default("dueling", True)))
       epsilon = 0.
       anneals = []
+      start, nsteps, end = self.get_arg_list(
+        "exploration_epsilon_start", "exploration_end_step",
+        "exploration_epsilon_end"
+      )
       if not noisy:
-        epsilon_anneal = LinearAnneal(
-            start=self.get_arg("exploration_epsilon_start"),
-            nsteps=self.get_arg("exploration_end_step"),
-            end=self.get_arg("exploration_epsilon_end"),
-            name="exploration_epsilon")
+        epsilon_anneal = LinearAnneal(start=start, nsteps=nsteps,
+                                      end=end, name="exploration_epsilon")
         epsilon = epsilon_anneal.get_tensor()
         anneals.append(epsilon_anneal)
       policy = (EpsilonGreedyPolicy.quantile(model, epsilon)
@@ -93,7 +96,10 @@ class DQNFactory(Factory):
       }
       optimizer = RMSprop(model.parameters(), self.get_arg("lr"),
                           **optimizer_kwargs)
-      return Trainer(optimizer)
+      return Trainer(
+        optimizer,
+        max_grad_norm=self.get_arg_default("max_grad_norm", None)
+      )
 
   def make_alg(self, runner, trainer, **kwargs):
     with self.override_context():
