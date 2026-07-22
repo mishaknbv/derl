@@ -12,7 +12,8 @@ class A2CTest(AlgTestCase):
     kwargs = A2CFactory.get_kwargs()
     self.env = make_env("SpaceInvadersNoFrameskip-v4",
                         nenvs=kwargs.get("nenvs"), seed=0)
-    self.alg = A2CFactory(**kwargs).make(self.env)
+    self.alg = A2CFactory(
+        **kwargs, ignore_unused=("num_recordings","nenvs")).make(self.env)
     self.alg.model.load_state_dict(torch.load("testdata/a2c/atari/model.pt"))
     self.alg.model.to("cpu")
 

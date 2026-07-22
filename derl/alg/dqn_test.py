@@ -12,7 +12,8 @@ class DQNTest(AlgTestCase):
     kwargs["storage_init_size"] = 42
     self.env = make_env("SpaceInvadersNoFrameskip-v4",
                         nenvs=kwargs.get("nenvs"), seed=0)
-    self.alg = DQNFactory(**kwargs).make(self.env)
+    self.alg = DQNFactory(
+        **kwargs, ignore_unused=("num_recordings",)).make(self.env)
     self.alg.model.to("cpu")
 
   def test_interactions(self):
