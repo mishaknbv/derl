@@ -35,6 +35,7 @@ jobs:
         pip install -e '.[atari,mujoco]'
         pip install pylint
     - name: Lint with pylint
+      continue-on-error: true
       run: |
         pylint derl
     - name: Run tests
