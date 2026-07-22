@@ -15,14 +15,18 @@ cv2.ocl.setUseOpenCL(False)
 
 class ObservationVideo(gym.Wrapper):
   """ Records the interactions and saves them as a video. """
-  def __init__(self, env, recording_period, fps=25, multithread=True):
+  def __init__(self, env, recording_period, prefix=None,
+               fps=25, multithread=True):
     super().__init__(env)
     self.recording_period = recording_period
+    self.prefix = prefix or self.env.spec.id
     self.fps = fps
     self.multithread = multithread
     self.step_count = 0
     self.last_recording = -sys.maxsize
     self.obs_list = []
+    self.had_ended_episodes = np.zeros(
+        getattr(self.env.unwrapped, "nenvs", 1), bool)
 
   @classmethod
   def make(cls, env, nlogs, nsteps):
@@ -33,14 +37,31 @@ class ObservationVideo(gym.Wrapper):
     """ Saves the video of the last frames. """
     if frames is None:
       frames = self.obs_list
-    frames = torch.tensor(np.asarray(frames)).permute(0, 3, 1, 2).unsqueeze(0)
-    summary.add_video(self.env.spec.id, frames,
+    frames = torch.tensor(np.asarray(frames))
+    if frames.ndim == 4:
+      frames = frames.permute(0, 3, 1, 2).unsqueeze(0)
+    elif frames.ndim == 5:
+      frames = frames.permute(1, 0, 4, 2, 3)
+    summary.add_video(self.prefix, frames,
                       fps=self.fps, global_step=self.step_count)
 
   def step(self, action):
     obs, rew, terminated, truncated, info = self.env.step(action)
-    self.obs_list.append(obs)
-    if (info.get("real_done", terminated or truncated)
+    if hasattr(self.unwrapped, "nenvs"):
+      self.obs_list.append(np.asarray([
+          info[i].get("raw_observation", obs[i])
+          for i in range(self.unwrapped.nenvs)
+      ]))
+      resets = np.asarray([
+          info[i].get("real_done", terminated[i] or truncated[i])
+          for i in range(self.unwrapped.nenvs)
+      ])
+    else:
+      self.obs_list.append(info.get("raw_observation", obs))
+      resets = np.asarray([info.get("real_done", terminated or truncated)])
+
+    self.had_ended_episodes |= resets
+    if (np.all(self.had_ended_episodes)
         and self.step_count - self.last_recording >= self.recording_period):
       if self.multithread:
         threading.Thread(target=self.save_video,
@@ -48,9 +69,11 @@ class ObservationVideo(gym.Wrapper):
       else:
         self.save_video()
       self.last_recording = self.step_count
-    if terminated or truncated:
+      self.had_ended_episodes.fill(False)
+    if np.all(self.had_ended_episodes):
       self.obs_list.clear()
-    self.step_count += 1
+      self.had_ended_episodes.fill(False)
+    self.step_count += self.had_ended_episodes.shape[0]
     return obs, rew, terminated, truncated, info
 
 
@@ -137,7 +160,7 @@ class StartWithRandomActions(gym.Wrapper):
     return obs, info
 
 
-class ImagePreprocessing(gym.ObservationWrapper):
+class ImagePreprocessing(gym.Wrapper):
   """ Preprocesses image-observations by possibly grayscaling and resizing. """
   def __init__(self, env, width=84, height=84, grayscale=True):
     super().__init__(env)
@@ -161,6 +184,16 @@ class ImagePreprocessing(gym.ObservationWrapper):
     observation = cv2.resize(observation, (self.width, self.height),
                              cv2.INTER_AREA)
     return observation
+
+  def step(self, action):
+    obs, rew, terminated, truncated, info = self.env.step(action)
+    info["raw_observation"] = obs
+    return self.observation(obs), rew, terminated, truncated, info
+
+  def reset(self, **kwargs):
+    obs, info = self.env.reset(**kwargs)
+    info["raw_observation"] = obs
+    return self.observation(obs), info
 
 
 class MaxBetweenFrames(gym.ObservationWrapper):

@@ -112,11 +112,13 @@ def nature_dqn_env(env_id, nenvs=None, seed=None, recording_period=None,
       nature_dqn_env,
       make_env_kwargs=[
           dict(
-            env_id=env_id, seed=s, recording_period=recording_period,
+            env_id=env_id, seed=s, recording_period=None,
             summarize=False, episodic_life=episodic_life, clip_reward=False
           ) for s in seed
       ],
     )
+    if recording_period:
+      env = ObservationVideo(env, recording_period, prefix=env_id)
     if summarize:
       env = Summarize.reward_summarizer(env, prefix=env_id)
     if clip_reward:
