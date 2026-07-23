@@ -4,6 +4,8 @@ derl.egg-info/
 
 logdir/
 
+tmp/
+
 *.swo
 *.swp
 
