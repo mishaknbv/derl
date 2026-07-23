@@ -4,13 +4,7 @@ from unittest import TestCase
 import numpy as np
 import numpy.testing as nt
 import torch
-
-
-def _np(tensor):
-  """ Converts tensor to numpy array. """
-  if isinstance(tensor, torch.Tensor):
-    return tensor.cpu().detach().numpy()
-  return tensor
+import torch.testing as tt
 
 
 class TorchTestCase(TestCase):
@@ -23,4 +17,10 @@ class TorchTestCase(TestCase):
   # pylint: disable=invalid-name
   def assertAllClose(self, actual, expected, rtol=1e-7, atol=0.):
     """ Checks that actual and expected arrays or torch tensors are equal. """
-    nt.assert_allclose(_np(actual), _np(expected), rtol=rtol, atol=atol)
+    self.assertEqual(type(actual), type(expected))
+    if isinstance(actual, np.ndarray):
+      nt.assert_allclose(actual, expected, rtol=rtol, atol=atol)
+    elif isinstance(actual, torch.Tensor):
+      tt.assert_close(actual, expected, rtol=rtol, atol=atol)
+    else:
+      raise TypeError(f"unsupported type {type(actual)=}")

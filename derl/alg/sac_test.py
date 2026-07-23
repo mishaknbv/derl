@@ -1,6 +1,7 @@
 # pylint: disable=missing-docstring
 from functools import partial
 import numpy as np
+import torch
 from derl.alg.test import AlgTestCase
 from derl.alg.sac import SACLossTuple
 from derl.env.make_env import make as make_env
@@ -36,7 +37,6 @@ class SACMuJoCoTest(AlgTestCase):
     self.alg.loss_fn.target_policy.model.to("cpu")
 
   def test_interactions(self):
-    # self.save_interactions("testdata/sac/mujoco/interactions.npz")
     self.assert_interactions("testdata/sac/mujoco/interactions.npz",
                              rtol=1e-6, atol=1e-6)
 
@@ -47,11 +47,7 @@ class SACMuJoCoTest(AlgTestCase):
     for field, lss in iter_sac_loss_tuple(loss):
       lss.backward()
       new_grads = {
-          f"{field}/grad_{i}": (
-            np.copy(param.grad.numpy())
-            if param.grad is not None
-            else None
-          )
+          f"{field}/grad_{i}": param.grad
           for i, param in enumerate(self.alg.model.parameters())
       }
       self.alg.model.zero_grad()
@@ -59,25 +55,25 @@ class SACMuJoCoTest(AlgTestCase):
         raise ValueError("intersection of gradient keys: "
                          f"{set(grads) & set(new_grads)}")
       grads.update(new_grads)
-    np.savez(fname, **grads)
+    torch.save(grads, fname)
 
   def assert_grad(self, fname, rtol=1e-7, atol=0.):
     interactions = next(self.alg.runner.run())
     loss = self.alg.loss(interactions)
-    with np.load(fname, allow_pickle=True) as expected:
-      for field, lss in iter_sac_loss_tuple(loss):
-        lss.backward()
-        for i, param in enumerate(self.alg.model.parameters()):
-          with self.subTest(field=field, grad_i=i):
-            if param.grad is None:
-              self.assertEqual(param.grad, expected[f"{field}/grad_{i}"])
-            else:
-              self.assertAllClose(param.grad, expected[f"{field}/grad_{i}"],
-                                  rtol=rtol, atol=atol)
-        self.alg.model.zero_grad()
+    expected = torch.load(fname)
+    for field, lss in iter_sac_loss_tuple(loss):
+      lss.backward()
+      for i, param in enumerate(self.alg.model.parameters()):
+        with self.subTest(field=field, grad_i=i):
+          if param.grad is None:
+            self.assertEqual(param.grad, expected[f"{field}/grad_{i}"])
+          else:
+            self.assertAllClose(param.grad, expected[f"{field}/grad_{i}"],
+                                rtol=rtol, atol=atol)
+      self.alg.model.zero_grad()
 
   def test_grad(self):
-    self.assert_grad("testdata/sac/mujoco/grads.npz", rtol=1e-5, atol=1e-5)
+    self.assert_grad("testdata/sac/mujoco/grads.pt", rtol=1e-5, atol=1e-5)
 
   def save_losses(self, filename, num_losses):
     data_iter = self.alg.runner.run()
@@ -87,17 +83,16 @@ class SACMuJoCoTest(AlgTestCase):
       for _, lss in iter_sac_loss_tuple(self.alg.step(next(data_iter))):
         new_losses.append(lss.detach().item())
       losses.append(new_losses)
-    np.save(filename, np.asarray(losses))
+    torch.save(torch.tensor(losses), filename)
 
   def assert_losses(self, filename, rtol=1e-6, atol=0.):
-    expected = np.load(filename)
+    expected = torch.load(filename)
     data_iter = self.alg.runner.run()
     for i in range(expected.shape[0]):
       loss = self.alg.step(next(data_iter))
-      with self.subTest(i=i):
-        self.assertAllClose([lss.detach().numpy() for _, lss
-                             in iter_sac_loss_tuple(loss)],
-                            expected[i], rtol=rtol, atol=atol)
+      for j, (name, lss) in enumerate(iter_sac_loss_tuple(loss)):
+        with self.subTest(i=i, name=name):
+          self.assertAllClose(lss, expected[i][j], rtol=rtol, atol=atol)
 
   def test_losses(self):
-    self.assert_losses("testdata/sac/mujoco/losses.npy", rtol=1e-5, atol=1e-5)
+    self.assert_losses("testdata/sac/mujoco/losses.pt", rtol=1e-5, atol=1e-5)

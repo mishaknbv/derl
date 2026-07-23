@@ -24,10 +24,10 @@ class PPOAtariTest(AlgTestCase):
                              rtol=1e-6, atol=1e-6)
 
   def test_grad(self):
-    self.assert_grad("testdata/ppo/atari/grads.npz", rtol=1e-6, atol=1e-6)
+    self.assert_grad("testdata/ppo/atari/grads.pt", rtol=1e-6, atol=1e-6)
 
   def test_losses(self):
-    self.assert_losses("testdata/ppo/atari/losses.npy", rtol=1e-5, atol=1e-5)
+    self.assert_losses("testdata/ppo/atari/losses.pt", rtol=1e-5, atol=1e-5)
 
 
 class PPOMuJoCoTest(AlgTestCase):
@@ -50,7 +50,7 @@ class PPOMuJoCoTest(AlgTestCase):
                              rtol=0, atol=1e-4)
 
   def test_grad(self):
-    self.assert_grad("testdata/ppo/mujoco/grads.npz", rtol=1e-5, atol=1e-5)
+    self.assert_grad("testdata/ppo/mujoco/grads.pt", rtol=1e-5, atol=1e-5)
 
   def test_losses(self):
-    self.assert_losses("testdata/ppo/mujoco/losses.npy", rtol=1e-5, atol=1e-5)
+    self.assert_losses("testdata/ppo/mujoco/losses.pt", rtol=1e-5, atol=1e-5)

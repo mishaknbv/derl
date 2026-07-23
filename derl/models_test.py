@@ -41,7 +41,7 @@ class DQNBaseTest(TorchTestCase):
   def test_call(self):
     inputs = torch.rand(32, 84, 84, 4)
     outputs = self.dqn_base(inputs)
-    expected = np.load("testdata/models/dqn-base-outputs.npy")
+    expected = torch.load("testdata/models/dqn-base-outputs.pt")
     self.assertAllClose(outputs, expected, atol=1e-6)
 
 

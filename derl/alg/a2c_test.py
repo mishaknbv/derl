@@ -22,7 +22,7 @@ class A2CTest(AlgTestCase):
                              rtol=1e-6, atol=1e-6)
 
   def test_grad(self):
-    self.assert_grad("testdata/a2c/atari/grads.npz", rtol=1e-6, atol=1e-6)
+    self.assert_grad("testdata/a2c/atari/grads.pt", rtol=1e-6, atol=1e-6)
 
   def test_losses(self):
-    self.assert_losses("testdata/a2c/atari/losses.npy", rtol=1e-5, atol=1e-4)
+    self.assert_losses("testdata/a2c/atari/losses.pt", rtol=1e-5, atol=1e-4)
