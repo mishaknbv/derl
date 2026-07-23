@@ -34,6 +34,24 @@ def huber_loss(predictions, targets, weights=None):
   return torch.mean(weights * losses)
 
 
+def qr_dqn_loss(qtargets, qvalues, weights=None):
+  """ QR-DQN loss. """
+  batch_size, num_quantiles = qtargets.shape
+  if weights is None:
+    weights = torch.ones(batch_size).to(qtargets.device)
+  nbins = qtargets.shape[-1]
+  arange = torch.arange(nbins + 1).to(qtargets.device)
+  tau = 0.5 * arange[:-1] + 0.5 * arange[1:]
+  target_shape = torch.Size([batch_size, num_quantiles, num_quantiles])
+  qtargets = torch.broadcast_to(qtargets[:, :, None], target_shape)
+  qvalues = torch.broadcast_to(qvalues[:, None], target_shape)
+  weights = (
+    weights[:, None, None]
+    * torch.abs(tau - (qtargets < qvalues).detach().to(torch.float32))
+  )
+  return huber_loss(qvalues, qtargets, weights)
+
+
 class DQNLoss(Loss):
   """ Deep Q-Learning algorithm loss function.
 
@@ -107,20 +125,9 @@ class DQNLoss(Loss):
     if "weights" in data:
       weights = self.torch_from_numpy(data["weights"])
     if qtargets.ndim == 2:
-      batch_size, num_quantiles = qtargets.shape
-      if weights is None:
-        weights = torch.ones(batch_size).to(qtargets.device)
-      nbins = qtargets.shape[-1]
-      arange = torch.arange(nbins + 1).to(qtargets.device)
-      tau = 0.5 * arange[:-1] + 0.5 * arange[1:]
-      target_shape = torch.Size([batch_size, num_quantiles, num_quantiles])
-      qtargets = torch.broadcast_to(qtargets[:, :, None], target_shape)
-      qvalues = torch.broadcast_to(qvalues[:, None], target_shape)
-      weights = (
-        weights[:, None, None]
-        * torch.abs(tau - (qtargets < qvalues).detach().to(torch.float32))
-      )
-    loss = huber_loss(qtargets, qvalues, weights=weights)
+      loss = qr_dqn_loss(qtargets, qvalues, weights=weights)
+    else:
+      loss = huber_loss(qtargets, qvalues, weights=weights)
 
     if summary.should_record():
       summary.add_scalar(f"{self.name}/r_squared",
