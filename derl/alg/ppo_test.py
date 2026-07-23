@@ -11,6 +11,7 @@ class PPOAtariTest(AlgTestCase):
     super().setUp()
 
     kwargs = PPOFactory.get_kwargs()
+    kwargs |= dict(num_epochs=2, num_minibatches=3)
     self.env = make_env("BreakoutNoFrameskip-v4",
                         nenvs=kwargs.get("nenvs"), seed=0)
     self.alg = PPOFactory(
@@ -27,6 +28,8 @@ class PPOAtariTest(AlgTestCase):
     self.assert_grad("testdata/ppo/atari/grads.pt", rtol=1e-6, atol=1e-6)
 
   def test_losses(self):
+    self.assertEqual(self.alg.runner.runner.num_epochs, 2)
+    self.assertEqual(self.alg.runner.runner.num_minibatches, 3)
     self.assert_losses("testdata/ppo/atari/losses.pt", rtol=1e-5, atol=1e-5)
 
 
@@ -53,4 +56,7 @@ class PPOMuJoCoTest(AlgTestCase):
     self.assert_grad("testdata/ppo/mujoco/grads.pt", rtol=1e-5, atol=1e-5)
 
   def test_losses(self):
+    self.assertEqual(self.alg.runner.runner.num_epochs, 3)
+    self.assertEqual(self.alg.runner.runner.num_minibatches, 2)
+    self.assertEqual(self.alg.runner.horizon, 12)
     self.assert_losses("testdata/ppo/mujoco/losses.pt", rtol=1e-5, atol=1e-5)

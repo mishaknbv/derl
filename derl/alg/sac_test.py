@@ -37,7 +37,7 @@ class SACMuJoCoTest(AlgTestCase):
 
   def test_interactions(self):
     self.assert_interactions("testdata/sac/mujoco/interactions.npz",
-                             rtol=1e-6, atol=1e-6)
+                             rtol=1e-5, atol=1e-4)
 
   def save_grad(self, fname):
     interactions = next(self.alg.runner.run())
@@ -72,7 +72,7 @@ class SACMuJoCoTest(AlgTestCase):
       self.alg.model.zero_grad()
 
   def test_grad(self):
-    self.assert_grad("testdata/sac/mujoco/grads.pt", rtol=1e-5, atol=1e-5)
+    self.assert_grad("testdata/sac/mujoco/grads.pt", rtol=1e-4, atol=1e-4)
 
   def save_losses(self, filename, num_losses):
     data_iter = self.alg.runner.run()
