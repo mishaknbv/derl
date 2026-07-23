@@ -40,5 +40,12 @@ jobs:
         pylint derl
     - name: Run tests
       if: ${{ matrix.os == 'macos-latest' && matrix.python-version == '3.13.13' }}
+      env:
+        OMP_NUM_THREADS: "1"
+        MKL_NUM_THREADS: "1"
+        OPENBLAS_NUM_THREADS: "1"
       run: |
+        pip freeze > default-requirements.txt
+        pip uninstall -y -r default-requirements.txt
+        pip install -r requirements.txt
         python -m unittest discover -s derl -p "*test.py"

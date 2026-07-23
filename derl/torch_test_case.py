@@ -13,6 +13,8 @@ class TorchTestCase(TestCase):
     torch.manual_seed(0)
     random.seed(0)
     np.random.seed(0)
+    torch.set_num_threads(1)
+    torch.use_deterministic_algorithms(True)
 
   # pylint: disable=invalid-name
   def assertAllClose(self, actual, expected, rtol=1e-7, atol=0.):

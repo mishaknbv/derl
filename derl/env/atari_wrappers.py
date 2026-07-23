@@ -1,7 +1,6 @@
 """ Atari env wrappers. """
 from collections import deque
 import sys
-import threading
 
 import cv2
 import gymnasium as gym
@@ -15,13 +14,11 @@ cv2.ocl.setUseOpenCL(False)
 
 class ObservationVideo(gym.Wrapper):
   """ Records the interactions and saves them as a video. """
-  def __init__(self, env, recording_period, prefix=None,
-               fps=25, multithread=True):
+  def __init__(self, env, recording_period, prefix=None, fps=25):
     super().__init__(env)
     self.recording_period = recording_period
     self.prefix = prefix or self.env.spec.id
     self.fps = fps
-    self.multithread = multithread
     self.step_count = 0
     self.last_recording = -sys.maxsize
     self.obs_list = []
@@ -63,11 +60,7 @@ class ObservationVideo(gym.Wrapper):
     self.had_ended_episodes |= resets
     if (np.all(self.had_ended_episodes)
         and self.step_count - self.last_recording >= self.recording_period):
-      if self.multithread:
-        threading.Thread(target=self.save_video,
-                         args=(self.obs_list[:],), daemon=True).start()
-      else:
-        self.save_video()
+      self.save_video()
       self.last_recording = self.step_count
       self.had_ended_episodes.fill(False)
     if np.all(self.had_ended_episodes):

@@ -1,6 +1,5 @@
 # pylint: disable=missing-docstring
 from functools import partial
-import numpy as np
 import torch
 from derl.alg.test import AlgTestCase
 from derl.alg.sac import SACLossTuple
