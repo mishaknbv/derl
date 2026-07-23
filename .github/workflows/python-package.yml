@@ -45,7 +45,5 @@ jobs:
         MKL_NUM_THREADS: "1"
         OPENBLAS_NUM_THREADS: "1"
       run: |
-        pip freeze > default-requirements.txt
-        pip uninstall -y -r default-requirements.txt
-        pip install -r requirements.txt
+        python config.py
         python -m unittest discover -s derl -p "*test.py"
