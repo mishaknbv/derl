@@ -16,6 +16,7 @@ class SACFactory(Factory):
     return {
         "mujoco": {
             "num-train-steps": 1e6,
+            "num-recordings": 10,
             "storage-size": int(1e6),
             "storage-init-size": 1000,
             "batch-size": 256,
@@ -32,9 +33,11 @@ class SACFactory(Factory):
     }.get(args_type)
 
   def make_env_kwargs(self, env_id):
-    _ = env_id
-    return dict(time_limit=False, normalize_obs=False,
-                normalize_ret=False, tanh_range_actions=True)
+    return (
+      super().make_env_kwargs(env_id)
+      | dict(normalize_obs=False, normalize_ret=False,
+             tanh_range_actions=True)
+    )
 
   def make_runner(self, env, nlogs=1e5, **kwargs):
     with self.override_context(**kwargs):

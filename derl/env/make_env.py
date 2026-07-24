@@ -7,7 +7,6 @@ except ImportError:
   pass  # pylint: disable=bare-except
 import ale_py
 from .atari_wrappers import (
-    ObservationVideo,
     EpisodicLife,
     FireReset,
     StartWithRandomActions,
@@ -19,7 +18,7 @@ from .atari_wrappers import (
 )
 from .env_batch import ParallelEnvBatch
 from .mujoco_wrappers import Normalize, TanhRangeActions
-from .summarize import Summarize
+from .summarize import VideoRecording, Summarize
 gym.register_envs(ale_py)
 
 
@@ -100,8 +99,11 @@ def set_seed(env, seed=None):
   env.action_space.seed(seed)
 
 
-def nature_dqn_env(env_id, nenvs=None, seed=None, recording_period=None,
-                   summarize=True, episodic_life=True, clip_reward=True):
+def nature_dqn_env(env_id,
+                   nenvs=None,
+                   seed=None,
+                   render_mode="rgb_array",
+                   **kwargs):
   """ Wraps env as in Nature DQN paper. """
   assert is_atari_id(env_id)
   if "NoFrameskip" not in env_id:
@@ -111,37 +113,28 @@ def nature_dqn_env(env_id, nenvs=None, seed=None, recording_period=None,
     env = ParallelEnvBatch(
       nature_dqn_env,
       make_env_kwargs=[
-          dict(
-            env_id=env_id, seed=s, recording_period=None,
-            summarize=False, episodic_life=episodic_life, clip_reward=False
-          ) for s in seed
+        dict(env_id=env_id, seed=s)
+        | kwargs | {"summarize": False, "recording_period": None}
+        for s in seed
       ],
     )
-    if recording_period:
-      env = ObservationVideo(env, recording_period, prefix=env_id)
-    if summarize:
-      env = Summarize.reward_summarizer(env, prefix=env_id)
-    if clip_reward:
-      env = ClipReward(env)
-    return env
+    return nature_dqn_wrap(env, prefix=env_id, **kwargs)
 
   ale_py.ALEInterface.setLoggerMode(ale_py.LoggerMode.Error)
-  env = gym.make(env_id)
+  env = gym.make(env_id, render_mode=render_mode)
   set_seed(env, seed)
-  return nature_dqn_wrap(env,
-                         recording_period=recording_period,
-                         summarize=summarize,
-                         episodic_life=episodic_life,
-                         clip_reward=clip_reward)
+  return nature_dqn_wrap(env, **kwargs)
 
 
-def nature_dqn_wrap(env, recording_period=None, summarize=True,
+def nature_dqn_wrap(env, prefix=None, recording_period=None, summarize=True,
                     episodic_life=True, clip_reward=True):
   """ Wraps given env as in nature DQN paper. """
   if recording_period is not None:
-    env = ObservationVideo(env, recording_period)
+    env = VideoRecording(env, recording_period, prefix=prefix or env.spec.id)
   if summarize:
-    env = Summarize.reward_summarizer(env)
+    env = Summarize.reward_summarizer(env, prefix=prefix or env.spec.id)
+  if hasattr(env.unwrapped, "nenvs"):
+    return env
   if episodic_life:
     env = EpisodicLife(env)
   if "FIRE" in env.unwrapped.get_action_meanings():
@@ -156,7 +149,8 @@ def nature_dqn_wrap(env, recording_period=None, summarize=True,
   return env
 
 
-def mujoco_env(env_id, nenvs=None, seed=None, time_limit=True, **kwargs):
+def mujoco_env(env_id, nenvs=None, seed=None,
+               render_mode="rgb_array", **kwargs):
   """ Creates and wraps MuJoCo env. """
   assert is_mujoco_id(env_id)
   seed = get_seed(nenvs, seed)
@@ -165,7 +159,8 @@ def mujoco_env(env_id, nenvs=None, seed=None, time_limit=True, **kwargs):
         mujoco_env,
         [
           dict(seed=s,
-               time_limit=time_limit,
+               recording_period=None,
+               render_mode=render_mode,
                summarize=False,
                normalize_obs=False,
                normalize_ret=False,
@@ -174,16 +169,17 @@ def mujoco_env(env_id, nenvs=None, seed=None, time_limit=True, **kwargs):
         ])
     return mujoco_wrap(env, **kwargs)
 
-  env = gym.make(env_id)
+  env = gym.make(env_id, render_mode=render_mode)
   set_seed(env, seed)
-  if not time_limit:
-    env = env.env
   return mujoco_wrap(env, **kwargs)
 
 
-def mujoco_wrap(env, summarize=True, normalize_obs=True, normalize_ret=True,
+def mujoco_wrap(env, recording_period=None, summarize=True,
+                normalize_obs=True, normalize_ret=True,
                 tanh_range_actions=False):
   """ Wraps given env as a mujoco env. """
+  if recording_period is not None:
+    env = VideoRecording(env, recording_period)
   if summarize:
     env = Summarize.reward_summarizer(env)
   if normalize_obs or normalize_ret:

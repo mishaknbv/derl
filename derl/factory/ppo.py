@@ -35,6 +35,7 @@ class PPOFactory(Factory):
         },
         "mujoco": {
             "num-train-steps": 1e6,
+            "num-recordings": 10,
             "nenvs": dict(type=int, default=None),
             "num-runner-steps": 2048,
             "gamma": 0.99,
