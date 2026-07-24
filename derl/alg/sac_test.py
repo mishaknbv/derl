@@ -31,7 +31,8 @@ class SACMuJoCoTest(AlgTestCase):
     self.env = make_env("HalfCheetah-v5", seed=0,
                         normalize_obs=False, normalize_ret=False)
     self.env.reset = partial(self.env.reset, seed=0)
-    self.alg = SACFactory(**kwargs).make(self.env)
+    self.alg = SACFactory(
+        **kwargs, ignore_unused=("num_recordings", "nenvs")).make(self.env)
     self.alg.model.to("cpu")
     self.alg.loss_fn.target_policy.model.to("cpu")
 

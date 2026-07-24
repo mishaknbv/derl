@@ -45,7 +45,8 @@ class PPOMuJoCoTest(AlgTestCase):
     self.env = make_env("HalfCheetah-v5",
                         nenvs=kwargs.get("nenvs"), seed=0)
     self.env.reset = partial(self.env.reset, seed=0)
-    self.alg = PPOFactory(**kwargs).make(self.env)
+    self.alg = PPOFactory(
+        **kwargs, ignore_unused=("num_recordings", "nenvs")).make(self.env)
     self.alg.model.to("cpu")
 
   def test_interactions(self):
