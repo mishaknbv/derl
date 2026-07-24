@@ -1,23 +1,18 @@
 """ Defines environment runner. """
 from abc import ABC, abstractmethod
 from collections import defaultdict
+import numpy as np
 
 
 class EnvRunner:
   """ Iterable that interacts with an env. """
-  def __init__(self, env, policy, horizon, nsteps=None, time_limit=None):
+  def __init__(self, env, policy, horizon, nsteps=None):
     self.env = env
     self.policy = policy
     self.horizon = horizon
     self.nsteps = int(nsteps)
-    if (time_limit is not None
-        and getattr(self.env.unwrapped, "nenvs", None) is not None):
-      raise TypeError("batched envs are not supported for time_limit "
-                      f"not equal to None, got env={self.env}, "
-                      f"time_limit={time_limit}")
-    self.time_limit = time_limit
     self.step_count = 0
-    self.episode_length = 0
+    self.done_after_exhausted = np.zeros(self.nenvs or 1, bool)
 
   @property
   def nenvs(self):
@@ -37,8 +32,7 @@ class EnvRunner:
     """ Interacts with the environment starting from obs for horizon steps. """
     if obs is None:
       obs, _ = self.env.reset()
-      self.episode_length = 0
-    while not self.is_exhausted():
+    while not self.is_exhausted() or not np.all(self.done_after_exhausted):
       interactions = defaultdict(list)
       for _ in range(self.horizon):
         act = self.policy.act(obs)
@@ -49,19 +43,19 @@ class EnvRunner:
         for key, val in act.items():
           interactions[key].append(val)
         new_obs, rew, terminated, truncated, info = self.env.step(act["actions"])
-        self.episode_length += 1
         interactions["rewards"].append(rew)
         interactions["terminated"].append(terminated)
         interactions["truncated"].append(truncated)
         interactions["infos"].append(info)
         interactions["next_observations"].append(new_obs)
 
+        if self.is_exhausted():
+          self.done_after_exhausted |= terminated | truncated
+
         # Note that batched envs should auto-reset, hence we only check
         # done flag if the env is not batched.
-        if self.nenvs is None and (
-            terminated or truncated or self.episode_length == self.time_limit):
+        if self.nenvs is None and (terminated or truncated):
           obs, _ = self.env.reset()
-          self.episode_length = 0
         else:
           obs = new_obs
 

@@ -175,7 +175,7 @@ def make_mujoco_sac_runner(env, policy, num_train_steps,
                            nlogs=1e5, **wrap_kwargs):
   """ Creates SAC runner for mujoco env. """
   runner = EnvRunner(env, policy, horizon=steps_per_sample,
-                     nsteps=num_train_steps, time_limit=steps_per_sample)
+                     nsteps=num_train_steps)
   runner = PeriodicSummaries.make_with_nlogs(runner, nlogs)
   runner = TransformInteractions(runner)
   runner = sac_runner_wrap(runner, **wrap_kwargs)
