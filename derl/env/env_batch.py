@@ -131,6 +131,8 @@ def worker(connection, make_env_function,
       kwargs = args
       ob, info = env.reset()
       connection.send((ob, info))
+    elif cmd == "render":
+      return env.render()
     elif cmd == "close":
       env.close()
       connection.close()
@@ -206,4 +208,7 @@ class ParallelEnvBatch(EnvBatch):
     self._closed = True
 
   def render(self):
-    raise ValueError("render not defined for %s" % self)
+    for conn in self._parent_connections:
+      conn.send(("render", {}))
+    frames = [conn.recv() for conn in self._parent_connections]
+    return np.stack(frames)

@@ -6,7 +6,6 @@ from .env_batch import (
     ParallelEnvBatch
 )
 from .atari_wrappers import (
-    ObservationVideo,
     EpisodicLife,
     FireReset,
     StartWithRandomActions,
@@ -32,6 +31,7 @@ from .make_env import (
     make,
 )
 from .summarize import (
+    VideoRecording,
     RewardSummarizer,
-    Summarize
+    Summarize,
 )
