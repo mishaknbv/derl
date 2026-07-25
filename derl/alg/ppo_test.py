@@ -3,6 +3,7 @@ from functools import partial
 import torch
 from derl.alg.test import AlgTestCase
 from derl.env.make_env import make as make_env
+from derl.factory import Config
 from derl.factory.ppo import PPOFactory
 
 
@@ -10,12 +11,12 @@ class PPOAtariTest(AlgTestCase):
   def setUp(self):
     super().setUp()
 
-    kwargs = PPOFactory.get_kwargs()
-    kwargs |= dict(num_epochs=2, num_minibatches=3)
-    self.env = make_env("BreakoutNoFrameskip-v4",
-                        nenvs=kwargs.get("nenvs"), seed=0)
-    self.alg = PPOFactory(
-        **kwargs, ignore_unused=("num_recordings", "nenvs")).make(self.env)
+    config = Config.make_for_factory(PPOFactory, args=[])
+    config.num_epochs = 2
+    config.num_minibatches = 3
+    del config.num_recordings
+    self.env = make_env("BreakoutNoFrameskip-v4", nenvs=config.nenvs, seed=0)
+    self.alg = PPOFactory(config).make(self.env)
     self.alg.model.load_state_dict(
         torch.load("testdata/ppo/atari/model.pt"))
     self.alg.model.to("cpu")
@@ -37,16 +38,15 @@ class PPOMuJoCoTest(AlgTestCase):
   def setUp(self):
     super().setUp()
 
-    kwargs = PPOFactory.get_kwargs("mujoco")
+    config = Config.make_for_factory(PPOFactory, "mujoco", args=[])
     # Modify some hyper parameters in order for the test not to take to long
-    kwargs["num_runner_steps"] = 12
-    kwargs["num_minibatches"] = 2
-    kwargs["num_epochs"] = 3
-    self.env = make_env("HalfCheetah-v5",
-                        nenvs=kwargs.get("nenvs"), seed=0)
+    config.num_runner_steps = 12
+    config.num_minibatches = 2
+    config.num_epochs = 3
+    del config.num_recordings
+    self.env = make_env("HalfCheetah-v5", nenvs=config.nenvs, seed=0)
     self.env.reset = partial(self.env.reset, seed=0)
-    self.alg = PPOFactory(
-        **kwargs, ignore_unused=("num_recordings", "nenvs")).make(self.env)
+    self.alg = PPOFactory(config).make(self.env)
     self.alg.model.to("cpu")
 
   def test_interactions(self):

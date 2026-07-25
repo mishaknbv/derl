@@ -4,6 +4,7 @@ import torch
 from derl.alg.test import AlgTestCase
 from derl.alg.sac import SACLossTuple
 from derl.env.make_env import make as make_env
+from derl.factory import Config
 from derl.factory.sac import SACFactory
 
 
@@ -22,17 +23,17 @@ class SACMuJoCoTest(AlgTestCase):
   def setUp(self):
     super().setUp()
 
-    kwargs = SACFactory.get_kwargs("mujoco")
-    kwargs["storage_size"] = 100
-    kwargs["storage_init_size"] = 10
-    kwargs["batch_size"] = 4
-    kwargs["steps_per_sample"] = 5
-    kwargs["num_storage_samples"] = 2
+    config = Config.make_for_factory(SACFactory, "mujoco", args=[])
+    config.storage_size = 100
+    config.storage_init_size = 10
+    config.batch_size = 4
+    config.steps_per_sample = 5
+    config.num_storage_samples = 2
+    del config.num_recordings
     self.env = make_env("HalfCheetah-v5", seed=0,
                         normalize_obs=False, normalize_ret=False)
     self.env.reset = partial(self.env.reset, seed=0)
-    self.alg = SACFactory(
-        **kwargs, ignore_unused=("num_recordings", "nenvs")).make(self.env)
+    self.alg = SACFactory(config).make(self.env)
     self.alg.model.to("cpu")
     self.alg.loss_fn.target_policy.model.to("cpu")
 

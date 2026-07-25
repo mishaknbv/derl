@@ -4,6 +4,20 @@ from argparse import ArgumentParser
 import derl
 
 
+def get_simple_parser(add_env_id=True, add_logdir=True, nlogs=1e5):
+  """ Creates and returns a simple parser. """
+  parser = ArgumentParser()
+
+  def maybe_add(add, *args, **kwargs):
+    if add:
+      parser.add_argument(*args, **kwargs)
+
+  maybe_add(add_env_id, "--env-id", required=True)
+  maybe_add(add_logdir, "--logdir", required=True)
+  maybe_add(add_logdir, "--nlogs", type=float, default=nlogs)
+  return parser
+
+
 def get_factories():
   """ Returns factory name to factory class mapping. """
   return {
@@ -12,25 +26,28 @@ def get_factories():
   }
 
 
+def get_env_type(env_id):
+  """ Returns the type of environment. """
+  if derl.env.is_atari_id(env_id):
+    return "atari"
+  if derl.env.is_mujoco_id(env_id):
+    return "mujoco"
+  raise ValueError(f"unsupported {env_id=}")
+
+
 def main():
   """ Script entry point. """
-  parser = ArgumentParser()
+  parser = get_simple_parser()
   factories = get_factories()
   parser.add_argument("factory", choices=list(factories.keys()))
   args, unknown_args = parser.parse_known_args()
   factory_class = factories[args.factory]
 
-  args = derl.get_args(
-      atari_defaults=factory_class.get_parser_defaults("atari"),
-      mujoco_defaults=factory_class.get_parser_defaults("mujoco"),
-      args=unknown_args)
-
-  kwargs = vars(args)
+  config = derl.factory.Config.make_for_factory(
+      factory_class, get_env_type(args.env_id), unknown_args)
   derl.summary.make_writer(args.logdir)
-  factory = factory_class(ignore_unused=("env_id", "nenvs", "logdir", "nlogs"),
-                          **kwargs)
-  env = derl.env.make(args.env_id, kwargs.get("nenvs"), kwargs.get("seed"),
-                      **factory.make_env_kwargs(args.env_id))
+  factory = factory_class(config)
+  env = derl.env.make(args.env_id, **factory.make_env_kwargs(args.env_id))
   alg = factory.make(env, nlogs=args.nlogs)
   alg.learn()
 

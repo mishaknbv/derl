@@ -14,11 +14,8 @@ from derl.runners.trajectory_transforms import GAE, MergeTimeBatch
 
 class A2CFactory(Factory):
   """ Advantage Actor-Critic Learner. """
-  def __init__(self, *, ignore_unused=("nenvs",), **kwargs):
-    super().__init__(ignore_unused=ignore_unused, **kwargs)
-
   @staticmethod
-  def get_parser_defaults(args_type="atari"):
+  def get_argdict(args_type="atari"):
     return {
         "atari": {
             "nenvs": 8,
@@ -33,49 +30,39 @@ class A2CFactory(Factory):
             "optimizer-epsilon": 1e-5,
             "value-loss-coef": 0.5,
             "entropy-coef": 0.01,
-            "max-grad-norm": 0.5,
+            "max-grad-norm": 1.5,
         }
     }.get(args_type)
 
-  @classmethod
-  def from_default_kwargs(cls, args_type="atari", ignore_unused=("nenvs",),
-                          **kwargs):
-    return super().from_default_kwargs(args_type, ignore_unused, **kwargs)
-
-  @classmethod
-  def from_args(cls, args_type="atari", ignore_unused=("nenvs",), args=None):
-    return super().from_args(args_type, ignore_unused, args)
-
-  def make_runner(self, env, nlogs=1e5, **kwargs):
-    with self.override_context(**kwargs):
-      model = (self.get_arg("model") if self.has_arg("model")
-               else make_model(env.observation_space, env.action_space, 1))
-      policy = ActorCriticPolicy(model)
-      gae_kwargs = self.get_arg_dict("gamma", "lambda_")
-      gae_kwargs["normalize"] = self.get_arg_default("normalize_gae", False)
-      runner = EnvRunner(env, policy, self.get_arg("num_runner_steps"),
-                         nsteps=self.get_arg("num_train_steps"))
-      runner = PeriodicSummaries.make_with_nlogs(runner, nlogs)
-      transforms = [GAE(policy, **gae_kwargs)]
-      if hasattr(env.unwrapped, "nenvs"):
-        transforms.append(MergeTimeBatch())
-      runner = TransformInteractions(runner, transforms)
-      return runner
+  def make_runner(self, env, model=None, nlogs=1e5, **kwargs):
+    self.config |= kwargs
+    if model is None:
+      model = make_model(env.observation_space, env.action_space, 1)
+    policy = ActorCriticPolicy(model)
+    runner = EnvRunner(env, policy, self.num_runner_steps,
+                       nsteps=self.num_train_steps)
+    runner = PeriodicSummaries.make_with_nlogs(runner, nlogs)
+    transforms = [GAE(policy, gamma=self.gamma, lambda_=self.lambda_,
+                      normalize=self.normalize_gae)]
+    if hasattr(env.unwrapped, "nenvs"):
+      transforms.append(MergeTimeBatch())
+    runner = TransformInteractions(runner, transforms)
+    return runner
 
   def make_trainer(self, runner, **kwargs):
-    with self.override_context(**kwargs):
-      lr = LinearAnneal(self.get_arg("lr"), self.get_arg("num_train_steps"),
-                        0., name="lr")
-      optimizer_kwargs = {
-          "alpha": self.get_arg_default("optimizer_alpha", 0.99),
-          "eps": self.get_arg_default("optimizer_epsilon", 1e-55)
-      }
-      optimizer = RMSprop(runner.policy.model.parameters(),
-                          lr.get_tensor(), **optimizer_kwargs)
-      return Trainer(optimizer, anneals=[lr],
-                     max_grad_norm=self.get_arg_default("max_grad_norm"))
+    self.config |= kwargs
+    lr = LinearAnneal(self.lr, self.num_train_steps, 0., name="lr")
+    optimizer_kwargs = {
+        "alpha": self.optimizer_alpha,
+        "eps": self.optimizer_epsilon
+    }
+    optimizer = RMSprop(runner.policy.model.parameters(),
+                        lr.get_tensor(), **optimizer_kwargs)
+    trainer =  Trainer(optimizer, anneals=[lr],
+                       max_grad_norm=self.max_grad_norm)
+    return trainer
 
   def make_alg(self, runner, trainer, **kwargs):
-    with self.override_context(**kwargs):
-      a2c_kwargs = self.get_arg_dict("value_loss_coef", "entropy_coef")
-      return A2C(runner, trainer, **a2c_kwargs)
+    self.config |= kwargs
+    return A2C(runner, trainer, value_loss_coef=self.value_loss_coef,
+               entropy_coef=self.entropy_coef)

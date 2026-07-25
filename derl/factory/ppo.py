@@ -11,11 +11,8 @@ from derl.runners.onpolicy import make_ppo_runner
 
 class PPOFactory(Factory):
   """ Proximal Policy Optimization factory. """
-  def __init__(self, *, ignore_unused=("nenvs",), **kwargs):
-    super().__init__(ignore_unused=ignore_unused, **kwargs)
-
   @staticmethod
-  def get_parser_defaults(args_type="atari"):
+  def get_argdict(args_type="atari"):
     defaults = {
         "atari": {
             "num-train-steps": 10e6,
@@ -52,42 +49,33 @@ class PPOFactory(Factory):
     }
     return defaults.get(args_type)
 
-  @classmethod
-  def from_default_kwargs(cls, args_type="atari", ignore_unused=("nenvs",),
-                          **kwargs):
-    return super().from_default_kwargs(args_type, ignore_unused, **kwargs)
-
-  @classmethod
-  def from_args(cls, args_type="atari", ignore_unused=("nenvs",), args=None):
-    return super().from_args(args_type, ignore_unused, args)
-
-  def make_runner(self, env, nlogs=1e5, **kwargs):
-    with self.override_context(**kwargs):
-      model = (self.get_arg("model") if self.has_arg("model")
-               else make_model(env.observation_space, env.action_space, 1))
-      policy = ActorCriticPolicy(model)
-      runner_kwargs = self.get_arg_dict("gamma", "lambda_",
-                                        "num_epochs", "num_minibatches")
-      runner = make_ppo_runner(env, policy, self.get_arg("num_runner_steps"),
-                               self.get_arg("num_train_steps"), nlogs=nlogs,
-                               **runner_kwargs)
-      return runner
+  def make_runner(self, env, model=None, nlogs=1e5, **kwargs):
+    self.config |= kwargs
+    if model is None:
+      model = make_model(env.observation_space, env.action_space, 1)
+    policy = ActorCriticPolicy(model)
+    runner = make_ppo_runner(env, policy, self.num_runner_steps,
+                             self.num_train_steps, nlogs=nlogs,
+                             gamma=self.gamma,
+                             lambda_=self.lambda_,
+                             num_epochs=self.num_epochs,
+                             num_minibatches=self.num_minibatches)
+    return runner
 
   def make_trainer(self, runner, **kwargs):
-    with self.override_context(**kwargs):
-      lr = LinearAnneal(*self.get_arg_list("lr", "num_train_steps"), name="lr")
-      params = runner.policy.model.parameters()
-      optimizer_kwargs = {"params": params, "lr": lr.get_tensor()}
-      if self.has_arg("optimizer_epsilon"):
-        optimizer_kwargs["eps"] = self.get_arg("optimizer_epsilon")
-      optimizer = Adam(**optimizer_kwargs)
-      return Trainer(optimizer, anneals=[lr],
-                     max_grad_norm=self.get_arg("max_grad_norm"))
+    self.config |= kwargs
+    lr = LinearAnneal(self.lr, self.num_train_steps, name="lr")
+    params = runner.policy.model.parameters()
+    optimizer_kwargs = {"params": params, "lr": lr.get_tensor(),
+                        "eps": self.optimizer_epsilon}
+    optimizer = Adam(**optimizer_kwargs)
+    return Trainer(optimizer, anneals=[lr],
+                   max_grad_norm=self.max_grad_norm)
 
   def make_alg(self, runner, trainer, **kwargs):
-    with self.override_context(**kwargs):
-      ppo_kwargs = self.get_arg_dict("value_loss_coef",
-                                     "entropy_coef",
-                                     "cliprange")
-      ppo = PPO(runner, trainer, **ppo_kwargs)
-      return ppo
+    self.config |= kwargs
+    ppo = PPO(runner, trainer,
+              value_loss_coef=self.value_loss_coef,
+              entropy_coef=self.entropy_coef,
+              cliprange=self.cliprange)
+    return ppo

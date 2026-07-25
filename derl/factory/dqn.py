@@ -12,7 +12,7 @@ from derl.runners.experience_replay import make_dqn_runner
 class DQNFactory(Factory):
   """ Deep Q-Learning Learner. """
   @staticmethod
-  def get_parser_defaults(args_type="atari"):
+  def get_argdict(args_type="atari"):
     return {
         "atari": {
             "num-train-steps": 200e6,
@@ -37,7 +37,6 @@ class DQNFactory(Factory):
             "optimizer-decay": 0.95,
             "optimizer-momentum": 0.,
             "optimizer-epsilon": 0.01,
-            "max-grad-norm": 100.,
             "gamma": 0.99,
             "target-update-period": int(10e3),
             "no-double": dict(action="store_false", dest="double"),
@@ -46,63 +45,64 @@ class DQNFactory(Factory):
 
   def make_model(self, env, init_fn=None, **kwargs):
     """ Creates Nature-DQN model for a given env. """
-    with self.override_context(**kwargs):
-      model_kwargs = self.get_arg_dict("noisy", "dueling", "num_quantiles")
-      if not self.get_arg("distributional"):
-        model_kwargs.pop("num_quantiles")
-      return NatureCNNModel(input_shape=env.observation_space.shape,
-                            output_units=env.action_space.n,
-                            **model_kwargs,
-                            init_fn=init_fn)
+    self.config |= kwargs
+    model_kwargs = dict(
+        noisy=self.noisy,
+        dueling=self.dueling,
+        num_quantiles=getattr(self.config, "num_quantiles", None)
+    )
+    if not self.distributional:
+      model_kwargs.pop("num_quantiles")
+    return NatureCNNModel(input_shape=env.observation_space.shape,
+                          output_units=env.action_space.n,
+                          **model_kwargs,
+                          init_fn=init_fn)
 
-  def make_runner(self, env, nlogs=1e5, **kwargs):
-    with self.override_context(**kwargs):
-      noisy = self.get_arg_default("noisy", False)
-      model = (self.get_arg("model") if self.has_arg("model") else
-               self.make_model(env, noisy=noisy,
-                               dueling=self.get_arg_default("dueling", True)))
-      epsilon = 0.
-      anneals = []
-      start, nsteps, end = self.get_arg_list(
-        "exploration_epsilon_start", "exploration_end_step",
-        "exploration_epsilon_end"
-      )
-      if not noisy:
-        epsilon_anneal = LinearAnneal(start=start, nsteps=nsteps,
-                                      end=end, name="exploration_epsilon")
-        epsilon = epsilon_anneal.get_tensor()
-        anneals.append(epsilon_anneal)
-      policy = (EpsilonGreedyPolicy.quantile(model, epsilon)
-                if self.get_arg("distributional")
-                else EpsilonGreedyPolicy(model, epsilon))
-      runner_kwargs = self.get_arg_dict("storage_size", "storage_init_size",
-                                        "batch_size", "steps_per_sample",
-                                        "nstep", "prioritized")
-      if self.has_arg("per_alpha") and self.get_arg("prioritized"):
-        runner_kwargs["alpha"] = self.get_arg("per_alpha")
-      if self.has_arg("per_beta") and self.get_arg("prioritized"):
-        runner_kwargs["beta"] = self.get_arg("per_beta")
-      runner = make_dqn_runner(env, policy, self.get_arg("num_train_steps"),
-                               anneals=anneals, nlogs=nlogs, **runner_kwargs)
-      return runner
+  def make_runner(self, env, model=None, nlogs=1e5, **kwargs):
+    self.config |= kwargs
+    if model is None:
+      model = self.make_model(env, noisy=self.noisy,
+                              dueling=self.dueling)
+    epsilon = 0.
+    anneals = []
+    start, nstep, end = (self.exploration_epsilon_start,
+                         self.exploration_end_step,
+                         self.exploration_epsilon_end)
+    if not self.noisy:
+      epsilon_anneal = LinearAnneal(start, nstep, end,
+                                    name="exploration_epsilon")
+      epsilon = epsilon_anneal.get_tensor()
+      anneals.append(epsilon_anneal)
+    policy = (EpsilonGreedyPolicy.quantile(model, epsilon)
+              if self.distributional
+              else EpsilonGreedyPolicy(model, epsilon))
+    runner_kwargs = dict(storage_size=self.storage_size,
+                         storage_init_size=self.storage_init_size,
+                         batch_size=self.batch_size,
+                         steps_per_sample=self.steps_per_sample,
+                         nstep=self.nstep,
+                         prioritized=self.prioritized)
+    runner_kwargs["alpha"] = self.per_alpha
+    runner_kwargs["beta"] = self.per_beta
+    runner = make_dqn_runner(env, policy, self.num_train_steps,
+                             anneals=anneals, nlogs=nlogs, **runner_kwargs)
+    return runner
 
   def make_trainer(self, runner, **kwargs):
-    with self.override_context(**kwargs):
-      model = runner.policy.model
-      optimizer_kwargs = {
-          "alpha": self.get_arg_default("optimizer_decay", 0.95),
-          "momentum": self.get_arg_default("optimizer_momentum", 0.),
-          "eps": self.get_arg_default("optimizer_epsilon", 0.01)
-      }
-      optimizer = RMSprop(model.parameters(), self.get_arg("lr"),
-                          **optimizer_kwargs)
-      return Trainer(
-        optimizer,
-        max_grad_norm=self.get_arg_default("max_grad_norm", None)
-      )
+    self.config |= kwargs
+    model = runner.policy.model
+    optimizer_kwargs = {
+        "alpha": self.optimizer_decay,
+        "momentum": self.optimizer_momentum,
+        "eps": self.optimizer_epsilon
+    }
+    optimizer = RMSprop(model.parameters(), self.lr, **optimizer_kwargs)
+    return Trainer(optimizer)
 
   def make_alg(self, runner, trainer, **kwargs):
-    with self.override_context():
-      dqn_kwargs = self.get_arg_dict("gamma", "target_update_period", "double")
-      alg = DQN(runner, trainer, **dqn_kwargs)
-      return alg
+    self.config |= kwargs
+    alg = DQN(runner, trainer,
+              gamma=self.gamma,
+              target_update_period=self.target_update_period,
+              double=self.double)
+    return alg

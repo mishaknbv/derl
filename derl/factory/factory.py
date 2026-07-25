@@ -1,109 +1,70 @@
 """ Code to construct different objects. """
 from abc import ABC, abstractmethod
-from contextlib import contextmanager
-from derl.scripts.parsers import get_defaults_parser
+import argparse
+from math import floor
 
 
-class KwargsDict:
-  """ Key-word arguments dictionary. """
-  def __init__(self, **kwargs):
-    self.kwargs = kwargs
-    self.unused = set(self.kwargs)
-
-  def __str__(self):
-    return str(self.kwargs)
-
-  def has_arg(self, key):
-    """ Return true if this kwargs dict has key. """
-    self.unused.discard(key)
-    return key in self.kwargs
-
-  def get_arg(self, key):
-    """ Returns argument under key. """
-    self.unused.discard(key)
-    return self.kwargs[key]
-
-  def get_arg_default(self, key, default=None):
-    """ Returns argument under key if it was specified or default otherwise. """
-    if key not in self.kwargs:
-      return default
-    return self.get_arg(key)
-
-  def get_arg_list(self, *keys):
-    """ Returns list of arguments under specified keys. """
-    return [self.get_arg(key) for key in keys]
-
-  def get_arg_dict(self, *keys, check_exists=True):
-    """ Returns dictionary of arugments under specified keys. """
-    return {key: self.get_arg(key) for key in keys
-            if not check_exists or self.has_arg(key)}
-
-  @contextmanager
-  def override_context(self, **kwargs):
-    """ Context manager for overriding kwargs. """
-    init_kwargs = dict(self.kwargs)
-    for key, val in kwargs.items():
-      self.kwargs[key] = val
+class Config:
+  """ Algorithm configuration dictionary. """
+  def __init__(self, **config):
+    self.unused = set()
+    for key, val in config.items():
+      key = key.replace('-', '_')
+      setattr(self, key, val)
       self.unused.add(key)
-    try:
-      yield
-    finally:
-      custom_unused = set(self.unused) & set(kwargs)
-      if custom_unused:
-        raise ValueError("not all custom kwargs were used in this context, "
-                         f"unused kwargs are {custom_unused}")
-      self.kwargs = init_kwargs
 
-  def reset_unused(self):
-    """ Adds all kwargs to the unused collection. """
-    self.unused = set(self.kwargs)
+  @classmethod
+  def make_for_factory(cls, factory_class, args_type="atari", args=None):
+    """ Creates a config for a factory. """
+    argdict = factory_class.get_argdict(args_type)
+    parser = argparse.ArgumentParser()
+    for key, val in argdict.items():
+      if isinstance(val, dict):
+        parser.add_argument(f"--{key}", **val)
+      else:
+        parser.add_argument(f"--{key}", type=type(val), default=val)
+    args = parser.parse_args(args)
+    return cls(**vars(args))
+
+  def __getattribute__(self, name):
+    unused = super().__getattribute__("unused")
+    unused.discard(name)
+    return super().__getattribute__(name)
+
+  def __delattr__(self, name):
+    self.unused.discard(name)
+    super().__delattr__(name)
+
+  def __ior__(self, other: dict):
+    for key, val in other.items():
+      key = key.replace('-', '_')
+      setattr(self, key, val)
+    return self
 
 
 class Factory(ABC):
   """ Factory to construct learning algorithms. """
-  def __init__(self, *, ignore_unused=None, **kwargs):
-    self.kwargs = KwargsDict(**kwargs)
-    self.ignore_unused = set(ignore_unused) if ignore_unused else set()
-
-  def __getattr__(self, name):
-    return getattr(self.kwargs, name)
+  def __init__(self, config):
+    self.config = config
 
   @staticmethod
   @abstractmethod
-  def get_parser_defaults(args_type="atari"):
+  def get_argdict(args_type="atari"):
     """ Returns default argument dictionary for argument parsing. """
+
+  def __getattr__(self, name):
+    return getattr(self.config, name)
 
   def make_env_kwargs(self, env_id):
     """ Returns keyword arguments for derl.env.make function. """
     _ = env_id
-    recording_period = \
-        self.get_arg("num_train_steps") // self.get_arg("num_recordings") + 1
-    return dict(recording_period=recording_period)
-
-  @classmethod
-  def get_kwargs(cls, args_type="atari"):
-    """ Returns dictionary of keyword arguments. """
-    dummy_parser = get_defaults_parser(cls.get_parser_defaults(args_type))
-    args = dummy_parser.parse_args([])
-    return vars(args)
-
-  @classmethod
-  def from_default_kwargs(cls, args_type="atari", ignore_unused=None, **kwargs):
-    """ Creates instance with default keyword arguments. """
-    default_kwargs = cls.get_kwargs(args_type)
-    default_kwargs.update(kwargs)
-    return cls(ignore_unused=ignore_unused, **default_kwargs)
-
-  @classmethod
-  def from_args(cls, args_type="atari", ignore_unused=None, args=None):
-    """ Creates factory after parsing command line arguments. """
-    defaults = cls.get_parser_defaults(args_type)
-    parser = get_defaults_parser(defaults)
-    args = parser.parse_args(args)
-    return cls(ignore_unused=ignore_unused, **vars(args))
+    recording_period = floor(
+      self.config.num_train_steps // self.config.num_recordings)
+    return dict(recording_period=recording_period,
+                nenvs=getattr(self.config, "nenvs", None))
 
   @abstractmethod
-  def make_runner(self, env, nlogs=1e5, **kwargs):
+  def make_runner(self, env, model=None, nlogs=1e5, **kwargs):
     """ Creates and returns algorithm runner. """
 
   @abstractmethod
@@ -114,19 +75,13 @@ class Factory(ABC):
   def make_alg(self, runner, trainer, **kwargs):
     """ Creates and returns alg instance with specified runner and trainer. """
 
-  def make(self, env, nlogs=1e5, check_kwargs=True, **kwargs):
+  def make(self, env, nlogs=1e5, check_kwargs=True):
     """ Creates and returns algorithm instance. """
-    with self.override_context(**kwargs):
-      runner = self.make_runner(env, nlogs=nlogs)
-      trainer = self.make_trainer(runner)
-      alg = self.make_alg(runner, trainer)
-      if check_kwargs and self.kwargs.unused - self.ignore_unused:
-        raise ValueError(
-            "constructing target object does not use all keyword arguments, "
-            "unused keyword arguments are: "
-            f"{self.kwargs.unused - self.ignore_unused};"
-            "if this is expected, consider adding them to ignore_unused "
-            "during factory construction or passing "
-            "`check_kwargs=False` to this method.")
-    self.kwargs.reset_unused()
+    runner = self.make_runner(env, nlogs=nlogs)
+    trainer = self.make_trainer(runner)
+    alg = self.make_alg(runner, trainer)
+    if check_kwargs and self.config.unused:
+      raise ValueError(
+          "constructing target object does not use all keyword arguments, "
+          f"unused keyword arguments are: {self.config.unused}; ")
     return alg

@@ -2,6 +2,7 @@
 import torch
 from derl.env.make_env import make as make_env
 from derl.factory.a2c import A2CFactory
+from derl.factory.factory import Config
 from derl.alg.test import AlgTestCase
 
 
@@ -9,11 +10,11 @@ class A2CTest(AlgTestCase):
   def setUp(self):
     super().setUp()
 
-    kwargs = A2CFactory.get_kwargs()
+    config = Config.make_for_factory(A2CFactory, args=[])
+    del config.num_recordings
     self.env = make_env("SpaceInvadersNoFrameskip-v4",
-                        nenvs=kwargs.get("nenvs"), seed=0)
-    self.alg = A2CFactory(
-        **kwargs, ignore_unused=("num_recordings","nenvs")).make(self.env)
+                        nenvs=config.nenvs, seed=0)
+    self.alg = A2CFactory(config).make(self.env)
     self.alg.model.load_state_dict(torch.load("testdata/a2c/atari/model.pt"))
     self.alg.model.to("cpu")
 
