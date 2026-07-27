@@ -257,7 +257,8 @@ class MLP(nn.Sequential):
 class MuJoCoModel(nn.Module):
   """ MuJoCo model. """
   def __init__(self, observation_dim, output_units, mlp=MLP,
-               logstd_from_mlp=None, init_fn=orthogonal_init):
+               logstd_from_mlp=None, init_fn=orthogonal_init,
+               logstd_clamp=(-20, 2)):
     super().__init__()
     if not isinstance(output_units, (tuple, list)):
       output_units = [output_units]
@@ -267,6 +268,7 @@ class MuJoCoModel(nn.Module):
     self.init_fn = init_fn
     if self.init_fn is not None:
       self.apply(self.init_fn)
+    self.logstd_clamp = logstd_clamp
     if logstd_from_mlp is None:
       outputs = self.module_list[0](torch.empty(observation_dim))
       logstd_from_mlp = (isinstance(outputs, (list, tuple))
@@ -283,6 +285,7 @@ class MuJoCoModel(nn.Module):
     first, *other = (module(observations) for module in self.module_list)
     if self.logstd is None:
       logits, logstd = first
+      logstd = torch.clamp(logstd, *self.logstd_clamp)
       return (logits, torch.exp(logstd), *other)
     batch_size = observations.shape[0]
     std = torch.repeat_interleave(torch.exp(self.logstd)[None], batch_size, 0)
