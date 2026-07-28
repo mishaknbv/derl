@@ -1,5 +1,6 @@
 """ Defines algorithm base class and various utils. """
 from abc import ABC, abstractmethod
+import os
 
 import numpy as np
 import torch
@@ -100,9 +101,11 @@ class Alg:
     loss = self.trainer.step(self, data)
     return loss
 
-  def learn(self):
+  def learn(self, model_filename="model.pt"):
     """ Performs learning with this algorithm. """
     with tqdm(total=len(self.runner)) as pbar:
       for data in self.runner.run():
         pbar.update(self.runner.step_count - pbar.n)
         self.step(data)
+    logdir = summary.writer.log_dir
+    torch.save(self.model.state_dict(), os.path.join(logdir, model_filename))

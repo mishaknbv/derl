@@ -1,7 +1,10 @@
 """ Code to construct different objects. """
 from abc import ABC, abstractmethod
 import argparse
+from copy import deepcopy
+from inspect import ismethod
 from math import floor
+from derl import summary
 
 
 class Config:
@@ -41,6 +44,18 @@ class Config:
       setattr(self, key, val)
     return self
 
+  def __str__(self):
+    unused = deepcopy(self.unused)
+    result = (f"{self.__class__.__name__}(\n"
+              + ",\n".join(
+                  f"\t{name}={getattr(self, name)}"
+                  for name in dir(self)
+                  if name != "unused" and not name.startswith("__")
+                  and not ismethod(getattr(self, name))
+              ) + "\n)")
+    self.unused = unused
+    return result
+
 
 class Factory(ABC):
   """ Factory to construct learning algorithms. """
@@ -75,9 +90,12 @@ class Factory(ABC):
   def make_alg(self, runner, trainer, **kwargs):
     """ Creates and returns alg instance with specified runner and trainer. """
 
-  def make(self, env, nlogs=1e5, check_kwargs=True):
+  def make(self, env, model=None, nlogs=1e5, check_kwargs=True, **kwargs):
     """ Creates and returns algorithm instance. """
-    runner = self.make_runner(env, nlogs=nlogs)
+    self.config |= kwargs
+    if summary.writer is not None:
+      summary.add_text("config", str(self.config), global_step=0)
+    runner = self.make_runner(env, model=model, nlogs=nlogs)
     trainer = self.make_trainer(runner)
     alg = self.make_alg(runner, trainer)
     if check_kwargs and self.config.unused:
