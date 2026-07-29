@@ -49,8 +49,8 @@ class ExperienceReplay(RunnerWrapper):
     for interactions in self.runner.run(obs=obs):
       interactions = {k: interactions[k] for k in
                       ("observations", "actions", "rewards",
-                       "terminated", "next_observations")}
-      interactions["resets"] = interactions.pop("terminated")
+                       "terminations", "next_observations")}
+      interactions["terminations"] = interactions.pop("terminations")
       self.storage.add_batch(**interactions)
       for anneal in self.anneals:
         if summary.should_record():
@@ -93,7 +93,7 @@ class PrioritizedExperienceReplay(ExperienceReplay):
     """ Updates priorities for specified inidices. """
     # Need to as well update priorities for interactions that occurred before
     # those, for which errors are computed as in the paper.
-    mask = ~self.storage.get(indices)["resets"][:, 0]
+    mask = ~self.storage.get(indices)["terminations"][:, 0]
     if not self.storage.is_full:
       mask &= indices > 0
     capacity = self.storage.capacity

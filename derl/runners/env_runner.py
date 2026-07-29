@@ -42,19 +42,19 @@ class EnvRunner:
                            f"but has keys {list(act.keys())}")
         for key, val in act.items():
           interactions[key].append(val)
-        new_obs, rew, terminated, truncated, info = self.env.step(act["actions"])
+        new_obs, rew, terminations, truncations, info = self.env.step(act["actions"])
         interactions["rewards"].append(rew)
-        interactions["terminated"].append(terminated)
-        interactions["truncated"].append(truncated)
+        interactions["terminations"].append(terminations)
+        interactions["truncations"].append(truncations)
         interactions["infos"].append(info)
         interactions["next_observations"].append(new_obs)
 
         if self.is_exhausted():
-          self.done_after_exhausted |= terminated | truncated
+          self.done_after_exhausted |= terminations | truncations
 
         # Note that batched envs should auto-reset, hence we only check
         # done flag if the env is not batched.
-        if self.nenvs is None and (terminated or truncated):
+        if self.nenvs is None and (terminations or truncations):
           obs, _ = self.env.reset()
         else:
           obs = new_obs

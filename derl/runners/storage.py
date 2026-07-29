@@ -18,7 +18,7 @@ class InteractionArrays:
     self.observations = np.empty(self.size, dtype=object)
     self.actions = np.empty(self.size, dtype=object)
     self.rewards = np.empty(self.size, dtype=np.float32)
-    self.resets = np.empty(self.size, dtype=bool)
+    self.terminations = np.empty(self.size, dtype=bool)
 
   def get(self, indices, nstep):
     """ Returns `nstep` interactions starting from indices `indices`. """
@@ -29,17 +29,17 @@ class InteractionArrays:
         "observations": recast_numpy(self.observations[indices]),
         "actions": recast_numpy(self.actions[indices]),
         "rewards": self.rewards[nstep_indices],
-        "resets": self.resets[nstep_indices],
+        "terminations": self.terminations[nstep_indices],
         "next_observations": recast_numpy(self.observations[next_indices]),
     }
     return result
 
-  def set(self, indices, observations, actions, rewards, resets):
+  def set(self, indices, observations, actions, rewards, terminations):
     """ Sets values under specified indices. """
     self.observations[indices] = list(observations)
     self.actions[indices] = list(actions)
     self.rewards[indices] = rewards
-    self.resets[indices] = resets
+    self.terminations[indices] = terminations
 
 
 class InteractionStorage:
@@ -89,22 +89,22 @@ class InteractionStorage:
     self.index = (index + 1) % self.capacity
     return index
 
-  def add_batch(self, observations, actions, rewards, resets,
+  def add_batch(self, observations, actions, rewards, terminations,
                 next_observations=None):
     """ Adds a batch of interactions to the storage. """
     self.check_next_observations(next_observations)
     batch_size = len(observations)
     if (batch_size != len(rewards) or batch_size != len(actions)
-        or batch_size != len(resets)):
+        or batch_size != len(terminations)):
       raise ValueError(
-          "observations, actions, rewards, and resets all must have the same "
+          "observations, actions, rewards, and terminations all must have the same "
           f"first dimension, got first dim sizes: {observations.shape[0]}, "
-          f"{actions.shape[0]}, {rewards.shape[0]}, {resets.shape[0]}")
+          f"{actions.shape[0]}, {rewards.shape[0]}, {terminations.shape[0]}")
 
     if self.store_next_observations:
       observations = list(zip(observations, next_observations))
     indices = (self.index + np.arange(batch_size)) % self.capacity
-    self.arrays.set(indices, observations, actions, rewards, resets)
+    self.arrays.set(indices, observations, actions, rewards, terminations)
     self.is_full = self.is_full or self.index + batch_size >= self.capacity
     self.index = (self.index + batch_size) % self.capacity
     return indices
@@ -162,11 +162,11 @@ class PrioritizedStorage(InteractionStorage):
     self.sum_tree.replace(indices, priorities)
     return index
 
-  def add_batch(self, observations, actions, rewards, resets,
+  def add_batch(self, observations, actions, rewards, terminations,
                 next_observations=None):
     """ Adds batch of data to storage. """
     _ = next_observations
-    newindices = super().add_batch(observations, actions, rewards, resets)
+    newindices = super().add_batch(observations, actions, rewards, terminations)
     self.pending_indices.extend(newindices)
     n = len(self.pending_indices) - self.num_pending
     indices = np.array([self.pending_indices.popleft() for _ in range(n)])

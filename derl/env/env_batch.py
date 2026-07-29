@@ -68,16 +68,19 @@ class EnvBatch(Env):
 
   def step(self, actions):
     self._check_actions(actions)
-    obs, rews, resets, infos = [], [], [], []
+    obs, rews, terminations, truncations, infos = [], [], [], []
     for env, action in zip(self._envs, actions):
-      ob, rew, done, info = env.step(action)
+      ob, rew, terminated, truncated, info = env.step(action)
       if done:
         ob = env.reset()
       obs.append(ob)
       rews.append(rew)
-      resets.append(done)
+      terminations.append(terminated)
+      truncations.append(truncated)
       infos.append(info)
-    return np.stack(obs), np.stack(rews), np.stack(resets), infos
+    obs, rew, terminations, truncations = map(
+        np.stack, (obs, rew, terminations, truncations))
+    return obs, rew, terminations, truncations, infos
 
   def reset(self):
     obs, infos = list(zip(*[env.reset() for env in self.envs]))

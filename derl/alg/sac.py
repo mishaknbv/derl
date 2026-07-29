@@ -101,7 +101,7 @@ class SACLoss(Loss):
 
     next_obs = self.torch_from_numpy(trajectory["next_observations"])
     rewards = self.torch_from_numpy(trajectory["rewards"])
-    resets = self.torch_from_numpy(trajectory["resets"])
+    terminations = self.torch_from_numpy(trajectory["terminations"])
 
     with torch.no_grad():
       next_actions = act["next_distribution"].sample()
@@ -118,9 +118,9 @@ class SACLoss(Loss):
                          "expected next_log_prob.shape + (1,) == "
                          "next_qvalues.shape")
       targets = next_qvalues - self.entropy_scale * next_log_prob[..., None]
-      resets = resets.type(targets.dtype)
+      terminations = terminations.type(targets.dtype)
       targets = (self.reward_scale * rewards
-                 + (1 - resets) * self.gamma * targets)
+                + (1 - terminations) * self.gamma * targets)
     return targets
 
   def qvalue_losses(self, trajectory, act=None):

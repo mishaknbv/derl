@@ -86,31 +86,32 @@ class DQNLoss(Loss):
     outputs = outputs[torch.arange(outputs.shape[0]), actions]
     return outputs
 
-  def compute_targets(self, rewards, resets, next_obs):
+  def compute_targets(self, rewards, terminations, next_obs):
     """ Computes target values. """
     nsteps = rewards.shape[1]
     targets = self.make_predictions(next_obs)
-    resets = resets.type(targets.dtype)
+    terminations = terminations.type(targets.dtype)
 
-    if len({rewards.shape, resets.shape}) != 1:
+    if len({rewards.shape, terminations.shape}) != 1:
       raise ValueError(
-          "rewards, resets must have the same shapes, "
-          f"got rewards.shape={rewards.shape}, resets.shape={resets.shape}")
+          "rewards, terminations must have the same shapes, "
+          f"got rewards.shape={rewards.shape}, "
+          f"terminations.shape={terminations.shape}")
     if targets.ndim == 2:
       rewards = rewards[:, :, None]
-      resets = resets[:, :, None]
+      terminations = terminations[:, :, None]
 
     for t in reversed(range(nsteps)):
-      targets = rewards[:, t] + (1 - resets[:, t]) * self.gamma * targets
+      targets = rewards[:, t] + (1 - terminations[:, t]) * self.gamma * targets
     return targets
 
   def __call__(self, data):
-    obs, actions, rewards, resets, next_obs = (
+    obs, actions, rewards, terminations, next_obs = (
         self.torch_from_numpy(data[k]) for k in (
             "observations", "actions", "rewards",
-            "resets", "next_observations"))
+            "terminations", "next_observations"))
 
-    qtargets = self.compute_targets(rewards, resets, next_obs)
+    qtargets = self.compute_targets(rewards, terminations, next_obs)
     qvalues = self.make_predictions(obs, actions)
     if "update_priorities" in data:
       errors = qtargets - qvalues

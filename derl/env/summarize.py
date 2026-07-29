@@ -39,14 +39,14 @@ class VideoRecording(Wrapper):
     obs, rew, terminated, truncated, info = self.env.step(action)
     self.frames.append(self.env.render())
     if hasattr(self.unwrapped, "nenvs"):
-      resets = np.asarray([
+      terminations = np.asarray([
           info[i].get("real_done", terminated[i] or truncated[i])
           for i in range(self.unwrapped.nenvs)
       ])
     else:
-      resets = np.asarray([info.get("real_done", terminated or truncated)])
+      terminations = np.asarray([info.get("real_done", terminated or truncated)])
 
-    self.had_ended_episodes |= resets
+    self.had_ended_episodes |= terminations
     if (np.all(self.had_ended_episodes)
         and self.step_count - self.last_recording >= self.recording_period):
       self.save_video()
@@ -71,6 +71,11 @@ class RewardSummarizer:
     self.reward_queues = [deque([], maxlen=running_mean_size)
                           for _ in range(nenvs)]
 
+  @property
+  def qlen(self):
+    """ Returns the length of the queue used to summarize rewards. """
+    return self.reward_queues[0].maxlen
+
   def should_add_summaries(self):
     """ Returns `True` if it is time to write summaries. """
     return summary.should_record() and np.all(self.had_ended_episodes)
@@ -83,18 +88,18 @@ class RewardSummarizer:
         min_reward=min(q[-1] for q in self.reward_queues),
         max_reward=max(q[-1] for q in self.reward_queues),
     )
-    summaries[f"reward_mean_{self.reward_queues[0].maxlen}"] = \
+    summaries[f"reward_mean_{self.qlen}"] = \
         np.mean([np.mean(q) for q in self.reward_queues])
 
     for key, val in summaries.items():
       summary.add_scalar(f"{self.prefix}/{key}", val,
                          global_step=self.step_count)
 
-  def step(self, rewards, resets):
+  def step(self, rewards, terminations):
     """ Takes statistics from last env step and tries to add summaries.  """
     self.rewards += rewards
     self.episode_lengths[~self.had_ended_episodes] += 1
-    for i, in zip(*resets.nonzero()):
+    for i, in zip(*terminations.nonzero()):
       self.reward_queues[i].append(self.rewards[i])
       self.rewards[i] = 0
       self.had_ended_episodes[i] = True
@@ -139,9 +144,9 @@ class Summarize(Wrapper):
     info_collection = [info] if isinstance(info, dict) else info
     done_collection = ([terminated | truncated] if isinstance(terminated, bool)
                        else terminated | truncated)
-    resets = np.asarray([info.get("real_done", done_collection[i])
+    terminations = np.asarray([info.get("real_done", done_collection[i])
                          for i, info in enumerate(info_collection)])
-    self.summarizer.step(rew, resets)
+    self.summarizer.step(rew, terminations)
 
     return obs, rew, terminated, truncated, info
 
