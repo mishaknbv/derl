@@ -49,11 +49,15 @@ class Config:
     result = (f"{self.__class__.__name__}(\n"
               + ",\n".join(
                   f"\t{name}={getattr(self, name)}"
-                  for name in dir(self)
-                  if name != "unused" and not name.startswith("__")
-                  and not ismethod(getattr(self, name))
+                  for name in self.asdict()
               ) + "\n)")
     self.unused = unused
+    return result
+
+  def asdict(self):
+    """ Returns config as dict. """
+    result = deepcopy(vars(self))
+    result.pop("unused")
     return result
 
 

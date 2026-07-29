@@ -28,11 +28,13 @@ def get_factories():
 
 def get_env_type(env_id):
   """ Returns the type of environment. """
-  if derl.env.is_atari_id(env_id):
-    return "atari"
-  if derl.env.is_mujoco_id(env_id):
-    return "mujoco"
-  raise ValueError(f"unsupported {env_id=}")
+  env_id = ''.join(env_id.split('-')[:-1])
+  if env_id.endswith("NoFrameskip"):
+    env_id = env_id[:-len("NoFrameskip")]
+  for key, envs in derl.env.list_envs().items():
+    if env_id in envs:
+      return key
+  raise ValueError(f"unknown env_type for {env_id=}")
 
 
 def main():

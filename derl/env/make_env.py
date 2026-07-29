@@ -22,7 +22,7 @@ from .summarize import VideoRecording, Summarize
 gym.register_envs(ale_py)
 
 
-def list_envs(env_type):
+def list_envs(env_type=None):
   """ Returns list of envs ids of given type. """
   impossible_roms = {"maze_craze", "joust", "warlords", "combat"}
   all_atari_games = {
@@ -49,9 +49,16 @@ def list_envs(env_type):
           "Ant",
           "Humanoid",
           "HumanoidStandup",
-      ]
+      ],
+      "classic-control": [
+          "Acrobot",
+          "CartPole",
+          "MountainCarContinuous",
+          "MountainCar",
+          "Pendulum",
+        ],
   }
-  return ids[env_type]
+  return ids[env_type] if env_type is not None else ids
 
 
 def is_atari_id(env_id):
@@ -68,10 +75,14 @@ def is_atari_id(env_id):
 def is_mujoco_id(env_id):
   """ Returns True if env_id corresponds to MuJoCo env. """
   env_id = "".join(env_id.split("-")[:-1])
-  if env_id.endswith("BulletEnv"):
-    env_id = env_id[:-len("BulletEnv")]
   mujoco_ids = set(list_envs("mujoco"))
   return env_id in mujoco_ids
+
+
+def is_classic_control_id(env_id):
+  """ Returns True if env_id corresponds to classic control env. """
+  env_id = "".join(env_id.split("-")[:-1])
+  return env_id in set(list_envs("classic-control"))
 
 
 def get_seed(nenvs=None, seed=None):
@@ -92,11 +103,6 @@ def get_seed(nenvs=None, seed=None):
   else:
     raise ValueError(f"invalid seed: {seed}")
   return seed
-
-
-def set_seed(env, seed=None):
-  """ Sets seed of a given env. """
-  env.action_space.seed(seed)
 
 
 def nature_dqn_env(env_id,
@@ -122,7 +128,7 @@ def nature_dqn_env(env_id,
 
   ale_py.ALEInterface.setLoggerMode(ale_py.LoggerMode.Error)
   env = gym.make(env_id, render_mode=render_mode)
-  set_seed(env, seed)
+  env.action_space.seed(seed)
   return nature_dqn_wrap(env, **kwargs)
 
 
@@ -170,7 +176,7 @@ def mujoco_env(env_id, nenvs=None, seed=None,
     return mujoco_wrap(env, **kwargs)
 
   env = gym.make(env_id, render_mode=render_mode)
-  set_seed(env, seed)
+  env.action_space.seed(seed)
   return mujoco_wrap(env, **kwargs)
 
 
@@ -189,23 +195,35 @@ def mujoco_wrap(env, recording_period=None, summarize=True,
   return env
 
 
-def make(env_id, nenvs=None, seed=None, summarize=True, **kwargs):
+def make(env_id, nenvs=None, seed=None,
+         recording_period=None, summarize=True, **kwargs):
   """ Creates env with standard wrappers. """
   if is_atari_id(env_id):
     return nature_dqn_env(env_id, nenvs, seed=seed,
+                          recording_period=recording_period,
                           summarize=summarize, **kwargs)
   if is_mujoco_id(env_id):
     return mujoco_env(env_id, nenvs, seed=seed,
+                      recording_period=recording_period,
                       summarize=summarize, **kwargs)
 
-  def _make(seed):
-    env = gym.make(env_id, **kwargs)
+  seed = get_seed(nenvs, seed)
+  if nenvs is not None:
+    env = ParallelEnvBatch(
+        make, [
+          dict(env_id=env_id, seed=s) | kwargs
+          | {"summarize": False, "recording_period": None}
+          for s in seed
+        ]
+    )
+    if recording_period is not None:
+      env = VideoRecording(env, prefix=env_id,
+                           recording_period=recording_period)
     if summarize:
       env = Summarize.reward_summarizer(env, prefix=env_id)
-    set_seed(env, seed)
     return env
 
-  seed = get_seed(nenvs, seed)
-  if nenvs is None:
-    return _make(seed)
-  return ParallelEnvBatch(_make, [dict(seed=s) for s in seed])
+  render_mode = kwargs.pop("render_mode", "rgb_array")
+  env = gym.make(env_id, render_mode=render_mode, **kwargs)
+  env.action_space.seed(seed)
+  return env

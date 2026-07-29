@@ -257,7 +257,8 @@ class MLP(nn.Sequential):
 class MuJoCoModel(nn.Module):
   """ MuJoCo model. """
   def __init__(self, observation_dim, output_units, mlp=MLP,
-               logstd_from_mlp=None, init_fn=orthogonal_init,
+               logstd=True, logstd_from_mlp=None,
+               init_fn=orthogonal_init,
                logstd_clamp=(-20, 2)):
     super().__init__()
     if not isinstance(output_units, (tuple, list)):
@@ -269,12 +270,13 @@ class MuJoCoModel(nn.Module):
     if self.init_fn is not None:
       self.apply(self.init_fn)
     self.logstd_clamp = logstd_clamp
-    if logstd_from_mlp is None:
+    self.logstd_from_mlp = logstd and logstd_from_mlp
+    if self.logstd_from_mlp is None:
       outputs = self.module_list[0](torch.empty(observation_dim))
-      logstd_from_mlp = (isinstance(outputs, (list, tuple))
-                         and len(outputs) == 2)
+      self.logstd_from_mlp = (isinstance(outputs, (list, tuple))
+                              and len(outputs) == 2)
     self.logstd = (nn.Parameter(torch.zeros(output_units[0]))
-                   if not logstd_from_mlp else None)
+                   if logstd and not self.logstd_from_mlp else None)
     self.to(get_device())
 
   @broadcast_inputs(ndims=2)
@@ -283,11 +285,13 @@ class MuJoCoModel(nn.Module):
     """ Forward propagates given the inputs. """
     observations, = inputs
     first, *other = (module(observations) for module in self.module_list)
-    if self.logstd is None:
+    if self.logstd_from_mlp:
       logits, logstd = first
       logstd = torch.clamp(logstd, *self.logstd_clamp)
       return (logits, torch.exp(logstd), *other)
     batch_size = observations.shape[0]
+    if self.logstd is None:
+      return (first, *other)
     std = torch.repeat_interleave(torch.exp(self.logstd)[None], batch_size, 0)
     return (first, std, *other)
 
@@ -304,19 +308,25 @@ def make_model(observation_space, action_space, other_outputs=None, **kwargs):
   if isinstance(other_outputs, int) or other_outputs is None:
     other_outputs = [other_outputs] if other_outputs is not None else []
 
+  if isinstance(observation_space, SpaceBatch):
+    observation_space = observation_space.spaces[0]
   if isinstance(action_space, SpaceBatch):
     action_space = action_space.spaces[0]
-  if isinstance(action_space, gym.spaces.Discrete):
+
+  if (isinstance(observation_space, gym.spaces.Box)
+      and len(observation_space.shape) == 3):
     output_units = [action_space.n, *other_outputs]
     return NatureCNNModel(input_shape=observation_space.shape,
                           output_units=output_units, **kwargs)
-  if isinstance(action_space, gym.spaces.Box):
-    observation_dim = vector_size(observation_space.shape)
-    action_dim = vector_size(action_space.shape)
-    output_units = [action_dim, *other_outputs]
-    return MuJoCoModel(observation_dim=observation_dim,
-                       output_units=output_units, **kwargs)
-  raise ValueError(f"unsupported action space {action_space}")
+  observation_dim = vector_size(observation_space.shape)
+  action_dim = (vector_size(action_space.shape)
+                if isinstance(action_space, gym.spaces.Box)
+                else action_space.n)
+  output_units = [action_dim, *other_outputs]
+  return MuJoCoModel(observation_dim=observation_dim,
+                     output_units=output_units,
+                     logstd=isinstance(action_space, gym.spaces.Box),
+                     **kwargs)
 
 
 class SACMLP(nn.Module):
