@@ -85,6 +85,17 @@ def is_classic_control_id(env_id):
   return env_id in set(list_envs("classic-control"))
 
 
+def get_env_type(env_id):
+  """ Returns the type of environment. """
+  env_id = ''.join(env_id.split('-')[:-1])
+  if env_id.endswith("NoFrameskip"):
+    env_id = env_id[:-len("NoFrameskip")]
+  for key, envs in list_envs().items():
+    if env_id in envs:
+      return key
+  raise ValueError(f"unknown env_type for {env_id=}")
+
+
 def get_seed(nenvs=None, seed=None):
   """ Returns seed(s) for specified number of envs. """
   if nenvs is None and seed is not None and not isinstance(seed, int):
@@ -109,6 +120,8 @@ def nature_dqn_env(env_id,
                    nenvs=None,
                    seed=None,
                    render_mode="rgb_array",
+                   max_num_frames_per_episode=108_000,
+                   repeat_action_prob=0.,
                    **kwargs):
   """ Wraps env as in Nature DQN paper. """
   assert is_atari_id(env_id)
@@ -117,23 +130,34 @@ def nature_dqn_env(env_id,
   seed = get_seed(nenvs)
   if nenvs is not None:
     env = ParallelEnvBatch(
-      nature_dqn_env,
-      make_env_kwargs=[
-        dict(env_id=env_id, seed=s)
-        | kwargs | {"summarize": False, "recording_period": None}
-        for s in seed
-      ],
+        nature_dqn_env,
+        make_env_kwargs=[
+          dict(env_id=env_id, seed=s,
+               max_num_frames_per_episode=max_num_frames_per_episode,
+               repeat_action_prob=repeat_action_prob)
+          | kwargs | {"summarize": False, "recording_period": None}
+          for s in seed
+        ],
     )
     return nature_dqn_wrap(env, prefix=env_id, **kwargs)
 
   ale_py.ALEInterface.setLoggerMode(ale_py.LoggerMode.Error)
-  env = gym.make(env_id, render_mode=render_mode)
+  env = gym.make(env_id, max_num_frames_per_episode=max_num_frames_per_episode,
+                 repeat_action_probability=repeat_action_prob,
+                 render_mode=render_mode)
   env.action_space.seed(seed)
   return nature_dqn_wrap(env, **kwargs)
 
 
-def nature_dqn_wrap(env, prefix=None, recording_period=None, summarize=True,
-                    episodic_life=True, clip_reward=True):
+def nature_dqn_wrap(
+    env,
+    prefix=None,
+    recording_period=None,
+    summarize=True,
+    episodic_life=True,
+    max_random_actions=30,
+    clip_reward=True
+):
   """ Wraps given env as in nature DQN paper. """
   if recording_period is not None:
     env = VideoRecording(env, recording_period, prefix=prefix or env.spec.id)
@@ -145,7 +169,7 @@ def nature_dqn_wrap(env, prefix=None, recording_period=None, summarize=True,
     env = EpisodicLife(env)
   if "FIRE" in env.unwrapped.get_action_meanings():
     env = FireReset(env)
-  env = StartWithRandomActions(env, max_random_actions=30)
+  env = StartWithRandomActions(env, max_random_actions=max_random_actions)
   env = MaxBetweenFrames(env)
   env = SkipFrames(env, 4)
   env = ImagePreprocessing(env, width=84, height=84, grayscale=True)
