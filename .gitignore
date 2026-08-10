@@ -5,6 +5,7 @@ build/
 derl.egg-info/
 
 logdir/
+runs/
 
 tmp/
 
