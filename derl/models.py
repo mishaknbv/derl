@@ -109,7 +109,8 @@ def get_device():
 
 class NatureCNNBase(nn.Sequential):
   """ Hidden layers of the Nature DQN model. """
-  def __init__(self, input_shape=(84, 84, 4), permute=True, noisy=False):
+  def __init__(self, input_shape=(84, 84, 4), permute=True,
+               output_features=512, activation=nn.ReLU, noisy=False):
     super().__init__()
     self.permute = permute
     in_channels, height, width = input_shape
@@ -123,12 +124,12 @@ class NatureCNNBase(nn.Sequential):
     for i, conv in enumerate(convolutions):
       height, width = conv2d_output_shape(height, width, conv)
       self.add_module(f"conv-{i}", conv)
-      self.add_module(f"relu-{i}", nn.ReLU())
+      self.add_module(f"relu-{i}", activation())
 
     self.add_module("flatten", nn.Flatten())
     in_features = height * width * convolutions[-1].out_channels
     linear_class = NoisyLinear if noisy else nn.Linear
-    self.add_module("linear", linear_class(in_features, 512))
+    self.add_module("linear", linear_class(in_features, output_features))
 
   @collocate_inputs(dtype=False)
   def forward(self, inputs):  # pylint: disable=arguments-renamed
@@ -269,6 +270,14 @@ class MuJoCoModel(nn.Module):
     self.init_fn = init_fn
     if self.init_fn is not None:
       self.apply(self.init_fn)
+    self.base = (
+        self.module_list[0].base
+        if hasattr(self.module_list[0], "base") # sacmlp
+        else nn.Sequential(*[   # mlp
+            l for i, l in enumerate(self.module_list[0])
+            if i < len(self.module_list) - 1
+        ])
+    )
     self.logstd_clamp = logstd_clamp
     self.logstd_from_mlp = logstd and logstd_from_mlp
     if self.logstd_from_mlp is None:
@@ -334,10 +343,10 @@ class SACMLP(nn.Module):
   def __init__(self, in_features, out_features, nheads=2,
                hidden_features=(256, 256), activation=nn.ReLU):
     super().__init__()
-    self.hidden = MLP(in_features=in_features,
-                      out_features=hidden_features[-1],
-                      hidden_features=hidden_features[:-1],
-                      activation=activation)
+    self.base = MLP(in_features=in_features,
+                    out_features=hidden_features[-1],
+                    hidden_features=hidden_features[:-1],
+                    activation=activation)
     if nheads is not None and nheads < 1:
       raise ValueError("nheads must be either None or at least 1, "
                        f"got nheads={nheads}")
@@ -348,7 +357,7 @@ class SACMLP(nn.Module):
 
   def forward(self, *inputs):
     """ Forward propagates given the inputs. """
-    hidden = self.activation(self.hidden.forward(*inputs))
+    hidden = self.activation(self.base.forward(*inputs))
     return [head(hidden) for head in self.heads][
         slice(None) if self.nheads is not None else 0]
 
