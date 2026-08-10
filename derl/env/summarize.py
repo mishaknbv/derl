@@ -1,6 +1,6 @@
 """ Wrapper for writing summaries. """
 from collections import deque
-import sys
+from math import floor
 from gymnasium import Wrapper
 import numpy as np
 import torch
@@ -9,55 +9,58 @@ from derl import summary
 
 class VideoRecording(Wrapper):
   """ Records the interactions and saves them as a video. """
-  def __init__(self, env, recording_period, prefix=None, fps=25):
+  def __init__(self, env, recording_period, prefix=None, max_batch_size=8):
     super().__init__(env)
     self.recording_period = recording_period
     self.prefix = prefix or self.env.spec.id
-    self.fps = fps
+    self.max_batch_size = max_batch_size
     self.step_count = 0
-    self.last_recording = -sys.maxsize
+    self.last_recording = -self.recording_period
     self.frames = []
-    self.had_ended_episodes = np.zeros(
-        getattr(self.env.unwrapped, "nenvs", 1), bool)
+    bs = min(self.max_batch_size, getattr(self.env.unwrapped, "nenvs", 1))
+    self.had_ended_episodes = np.zeros(bs, bool)
 
   @classmethod
   def make(cls, env, nlogs, nsteps):
     """ Creates an instance that will write nlogs over nsteps. """
-    return cls(env, nsteps // nlogs + 1)
+    return cls(env, floor(nsteps / nlogs))
 
   def save_video(self):
     """ Saves the video of the last frames. """
-    frames = torch.tensor(np.asarray(self.frames))
+    frames = np.stack(self.frames)
+    self.frames.clear()  # optimize memo usage, np has a copy of frames, can del
+    frames = torch.from_numpy(frames)
     if frames.ndim == 4:
       frames = frames.permute(0, 3, 1, 2).unsqueeze(0)
     elif frames.ndim == 5:
       frames = frames.permute(1, 0, 4, 2, 3)
-    summary.add_video(self.prefix, frames,
-                      fps=self.fps, global_step=self.step_count)
+    summary.add_video(self.prefix, frames, global_step=self.step_count)
 
   def step(self, action):
     obs, rew, terminated, truncated, info = self.env.step(action)
-    self.frames.append(self.env.render())
+    frames = self.env.render()
     if hasattr(self.unwrapped, "nenvs"):
-      terminations = np.asarray([
+      dones = np.asarray([
           info[i].get("real_done", terminated[i] or truncated[i])
           for i in range(self.unwrapped.nenvs)
       ])
+      frames = frames[:self.max_batch_size]
+      dones = dones[:self.max_batch_size]
     else:
-      terminations = np.asarray([info.get("real_done", terminated or truncated)])
+      dones = np.asarray([info.get("real_done", terminated or truncated)])
+    self.frames.append(frames)
 
-    self.had_ended_episodes |= terminations
+    self.had_ended_episodes |= dones
     if (np.all(self.had_ended_episodes)
         and self.step_count - self.last_recording >= self.recording_period):
       self.save_video()
-      self.last_recording = max(0, self.last_recording + self.recording_period)
+      self.last_recording = self.last_recording + self.recording_period
       self.had_ended_episodes.fill(False)
     if np.all(self.had_ended_episodes):
       self.frames.clear()
       self.had_ended_episodes.fill(False)
-    self.step_count += self.had_ended_episodes.shape[0]
+    self.step_count += getattr(self.env.unwrapped, "nenvs", 1)
     return obs, rew, terminated, truncated, info
-
 
 
 class RewardSummarizer:
