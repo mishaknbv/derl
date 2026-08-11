@@ -54,12 +54,14 @@ class PPOFactory(Factory):
     if model is None:
       model = make_model(env.observation_space, env.action_space, 1)
     policy = ActorCriticPolicy(model)
-    runner = make_ppo_runner(env, policy, self.num_runner_steps,
-                             self.num_train_steps, nlogs=nlogs,
-                             gamma=self.gamma,
-                             lambda_=self.lambda_,
-                             num_epochs=self.num_epochs,
-                             num_minibatches=self.num_minibatches)
+    runner = make_ppo_runner(
+        env, policy, self.num_runner_steps,
+        self.num_train_steps, nlogs=nlogs,
+        gamma=self.gamma,
+        lambda_=self.lambda_,
+        num_epochs=self.num_epochs,
+        num_minibatches=self.num_minibatches
+    )
     return runner
 
   def make_trainer(self, runner, **kwargs):

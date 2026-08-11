@@ -4,6 +4,7 @@ import argparse
 from copy import deepcopy
 from math import floor
 from derl import summary
+from derl.env.make_env import make as make_env
 
 
 class Config:
@@ -73,13 +74,14 @@ class Factory(ABC):
   def __getattr__(self, name):
     return getattr(self.config, name)
 
-  def make_env_kwargs(self, env_id):
-    """ Returns keyword arguments for derl.env.make function. """
-    _ = env_id
-    recording_period = floor(
-      self.config.num_train_steps // self.config.num_recordings)
-    return dict(recording_period=recording_period,
-                nenvs=getattr(self.config, "nenvs", None))
+  def make_env(self, env_id, **kwargs):
+    """ Creates an instance of the environment. """
+    self.config |= kwargs
+    recording_period = (
+        floor(self.config.num_train_steps / self.config.num_recordings)
+        if getattr(self.config, "num_recordings", 0) else None
+    )
+    return make_env(env_id, recording_period=recording_period, **kwargs)
 
   @abstractmethod
   def make_runner(self, env, model=None, nlogs=1e5, **kwargs):
@@ -98,6 +100,8 @@ class Factory(ABC):
     self.config |= kwargs
     if summary.writer is not None:
       summary.add_text("config", str(self.config), global_step=0)
+    if isinstance(env, str):
+      env = self.make_env(env)
     runner = self.make_runner(env, model=model, nlogs=nlogs)
     trainer = self.make_trainer(runner)
     alg = self.make_alg(runner, trainer)

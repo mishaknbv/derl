@@ -32,12 +32,12 @@ class SACFactory(Factory):
         }
     }.get(args_type)
 
-  def make_env_kwargs(self, env_id):
-    return (
-      super().make_env_kwargs(env_id)
-      | dict(normalize_obs=False, normalize_ret=False,
-             tanh_range_actions=True)
-    )
+  def make_env(self, env_id, **kwargs):
+    self.config |= kwargs
+    return super().make_env(env_id,
+                            normalize_obs=False,
+                            normalize_ret=False,
+                            tanh_range_actions=True)
 
   def make_runner(self, env, model=None, nlogs=1e5, **kwargs):
     self.config |= kwargs

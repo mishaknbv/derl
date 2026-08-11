@@ -49,8 +49,7 @@ def main():
       factory_class, get_env_type(args.env_id), unknown_args)
   derl.summary.make_writer(args.logdir)
   factory = factory_class(config)
-  env = derl.env.make(args.env_id, **factory.make_env_kwargs(args.env_id))
-  alg = factory.make(env, nlogs=args.nlogs)
+  alg = factory.make(args.env_id, nlogs=args.nlogs)
   alg.learn()
 
 
