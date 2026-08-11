@@ -85,9 +85,9 @@ class Normalize(gym.Wrapper):
     if filename_prefix is None:
       filename_prefix = camel2snake(self.__class__.__name__)
     if self.obs_rmv is not None:
-      self.obs_rmv.save(f"{filename-prefix}-obs-rmv.npz")
+      self.obs_rmv.save(f"{filename_prefix}-obs-rmv.npz")
     if self.ret_rmv is not None:
-      self.ret_rmv.save(f"{filename-prefix}-ret-rmv.npz")
+      self.ret_rmv.save(f"{filename_prefix}-ret-rmv.npz")
 
   def restore_wrapper(self, filename_prefix=None):
     """ Restores normalization statistics from a file. """

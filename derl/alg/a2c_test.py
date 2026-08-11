@@ -1,29 +1,32 @@
-# pylint: disable=missing-docstring
+# pylint: disable=missing-docstring, redefined-outer-name
 import torch
+import pytest
+
+from derl.alg.test import assert_grad, assert_interactions, assert_losses
 from derl.env.make_env import make as make_env
 from derl.factory.a2c import A2CFactory
 from derl.factory.factory import Config
-from derl.alg.test import AlgTestCase
 
 
-class A2CTest(AlgTestCase):
-  def setUp(self):
-    super().setUp()
+@pytest.fixture
+def a2c_alg():
+  config = Config.make_for_factory(A2CFactory, args=[])
+  del config.num_recordings
+  env = make_env("SpaceInvadersNoFrameskip-v4", nenvs=config.nenvs, seed=0)
+  alg = A2CFactory(config).make(env)
+  alg.model.load_state_dict(torch.load("testdata/a2c/atari/model.pt"))
+  alg.model.to("cpu")
+  return alg
 
-    config = Config.make_for_factory(A2CFactory, args=[])
-    del config.num_recordings
-    self.env = make_env("SpaceInvadersNoFrameskip-v4",
-                        nenvs=config.nenvs, seed=0)
-    self.alg = A2CFactory(config).make(self.env)
-    self.alg.model.load_state_dict(torch.load("testdata/a2c/atari/model.pt"))
-    self.alg.model.to("cpu")
 
-  def test_interactions(self):
-    self.assert_interactions("testdata/a2c/atari/interactions.npz",
-                             rtol=1e-6, atol=1e-6)
+def test_a2c_interactions(a2c_alg):
+  assert_interactions("testdata/a2c/atari/interactions.npz",
+                      a2c_alg, rtol=1e-6, atol=1e-6)
 
-  def test_grad(self):
-    self.assert_grad("testdata/a2c/atari/grads.pt", rtol=1e-6, atol=1e-6)
 
-  def test_losses(self):
-    self.assert_losses("testdata/a2c/atari/losses.pt", rtol=1e-5, atol=1e-4)
+def test_a2c_grad(a2c_alg):
+  assert_grad("testdata/a2c/atari/grads.pt", a2c_alg, rtol=1e-6, atol=1e-6)
+
+
+def test_a2c_losses(a2c_alg):
+  assert_losses("testdata/a2c/atari/losses.pt", a2c_alg, rtol=1e-5, atol=1e-4)

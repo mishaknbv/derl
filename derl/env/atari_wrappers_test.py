@@ -1,5 +1,4 @@
 # pylint: disable=missing-docstring
-from unittest import TestCase
 import numpy as np
 import numpy.testing as nt
 from gymnasium import make as gym_make
@@ -14,25 +13,19 @@ def run_env(env, nsteps=100):
   return np.asarray(obs)
 
 
-class TestSeed(TestCase):
-  # pylint: disable=invalid-name
-  def assertArrayEqual(self, expected, actual):
-    return nt.assert_array_equal(expected, actual)
+def test_seed():
+  def make_with_gym():
+    env = gym_make("BreakoutNoFrameskip-v4")
+    env.action_space.seed(0)
+    return env
 
-  def test_seed(self):
-    def make_with_gym():
-      env = gym_make("BreakoutNoFrameskip-v4")
-      env.action_space.seed(0)
-      return env
+  def make_with_derl():
+    return derl_make("BreakoutNoFrameskip-v4")
 
-    def make_with_derl():
-      return derl_make("BreakoutNoFrameskip-v4")
+  for makefn in [make_with_gym, make_with_derl]:
+    env = makefn()
+    obs = run_env(env)
+    newenv = makefn()
+    newobs = run_env(newenv)
 
-    for makefn in [make_with_gym, make_with_derl]:
-      with self.subTest(makefn=makefn.__name__):
-        env = makefn()
-        obs = run_env(env)
-        newenv = makefn()
-        newobs = run_env(newenv)
-
-        self.assertArrayEqual(obs, newobs)
+    nt.assert_array_equal(obs, newobs)
