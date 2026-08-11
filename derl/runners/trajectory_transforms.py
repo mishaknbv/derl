@@ -2,6 +2,31 @@
 import numpy as np
 
 
+def compute_gae(rewards, terminations, values, last_value,
+                gamma=0.99, lambda_=0.95):
+  """ Computes GAE. """
+  target_dim = values.ndim
+  if values.ndim == rewards.ndim + 1:
+    values = values.squeeze(-1)
+  gae = np.zeros_like(values, dtype=np.float32)
+  gae[-1] = rewards[-1] - values[-1]
+  if np.asarray(terminations[-1]).ndim < last_value.ndim:
+    last_value = np.squeeze(last_value, -1)
+  gae[-1] += (1 - terminations[-1]) * gamma * last_value
+
+  for i in range(gae.shape[0] - 1, 0, -1):
+    not_reset = 1 - terminations[i - 1]
+    next_values = values[i]
+    delta = (rewards[i - 1]
+             + not_reset * gamma * next_values
+             - values[i - 1])
+    gae[i - 1] = delta + not_reset * gamma * lambda_ * gae[i]
+  value_targets = gae + values
+  value_targets = value_targets[
+      (...,) + (None,) * (target_dim - value_targets.ndim)]
+  return gae, value_targets
+
+
 class GAE:
   """ Generalized Advantage Estimator.
 
@@ -39,30 +64,14 @@ class GAE:
           "must have the same number of dimensions as "
           f"trajectory['rewards'] which has shape {rewards.shape} "
           "or have last dimension of size 1")
-    if values.ndim == rewards.ndim + 1:
-      values = np.squeeze(values, -1)
 
-    gae = np.zeros_like(values, dtype=np.float32)
-    gae[-1] = rewards[-1] - values[-1]
     observation = trajectory["state"]["latest_observations"]
     state = trajectory["state"].get("policy_state", None)
     last_value = self.policy.act(observation, state=state,
                                  update_state=False)["values"]
-    if np.asarray(terminations[-1]).ndim < last_value.ndim:
-      last_value = np.squeeze(last_value, -1)
-    gae[-1] += (1 - terminations[-1]) * self.gamma * last_value
 
-    # pylint: disable=unsubscriptable-object
-    for i in range(gae.shape[0] - 1, 0, -1):
-      not_reset = 1 - terminations[i - 1]
-      next_values = values[i]
-      delta = (rewards[i - 1]
-               + not_reset * self.gamma * next_values
-               - values[i - 1])
-      gae[i - 1] = delta + not_reset * self.gamma * self.lambda_ * gae[i]
-    value_targets = gae + values
-    value_targets = value_targets[
-        (...,) + (None,) * (trajectory["values"].ndim - value_targets.ndim)]
+    gae, value_targets = compute_gae(rewards, terminations, values, last_value,
+                                     gamma=self.gamma, lambda_=self.lambda_)
 
     if self.normalize or self.normalize is None and gae.size > 1:
       gae = (gae - gae.mean()) / (gae.std() + self.epsilon)
@@ -74,8 +83,13 @@ class GAE:
 
 class MergeTimeBatch:
   """ Merges first two axes typically representing time and env batch. """
+  def __init__(self, check_shape=True):
+    self.check_shape = check_shape
+
   def __call__(self, trajectory):
-    assert trajectory["terminations"].ndim == 2, trajectory["terminations"].shape
+    if self.check_shape:
+      assert trajectory["terminations"].ndim == 2,\
+        trajectory["terminations"].shape
     for key, val in filter(lambda kv: isinstance(kv[1], np.ndarray),
                            trajectory.items()):
       trajectory[key] = np.reshape(val, (-1, *val.shape[2:]))
