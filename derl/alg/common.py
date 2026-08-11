@@ -2,7 +2,6 @@
 from abc import ABC, abstractmethod
 import os
 
-import numpy as np
 import torch
 from tqdm import tqdm
 from derl import summary
@@ -40,7 +39,7 @@ class Loss(ABC):
 
   def torch_from_numpy(self, arr):
     """ Casts np.ndarray to torch.Tensor and moves to model device. """
-    dtype = None if arr.dtype != np.float64 else torch.float32
+    dtype = None # if arr.dtype != np.float64 else torch.float32
     return torch.from_numpy(arr).to(device=self.device, dtype=dtype)
 
   @abstractmethod

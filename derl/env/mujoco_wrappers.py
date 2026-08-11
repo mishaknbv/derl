@@ -15,8 +15,8 @@ class RunningMeanVar:
   """
     # https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Parallel_algorithm
   def __init__(self, eps=1e-4, shape=()):
-    self.mean = np.zeros(shape)
-    self.var = np.ones(shape)
+    self.mean = np.zeros(shape, dtype=np.float32)
+    self.var = np.ones(shape, dtype=np.float32)
     self.count = eps
 
   def update(self, batch):
@@ -94,6 +94,14 @@ class Normalize(gym.Wrapper):
     if self.ret_rmv is not None:
       self.ret_rmv.restore(f"{filename}-ret-rmv.npz")
 
+  def normalize_observation(self, obs):
+    """ Normalizes the observation. """
+    if not self.obs_rmv:
+      return obs
+    obs = (obs - self.obs_rmv.mean) / np.sqrt(self.obs_rmv.var + self.eps)
+    obs = np.clip(obs, -self.clipob, self.clipob)
+    return obs
+
   def observation(self, obs):
     """ Preprocesses a given observation. """
     if not self.obs_rmv:
@@ -102,9 +110,7 @@ class Normalize(gym.Wrapper):
                  if not hasattr(self.env.unwrapped, "nenvs")
                  else obs)
     self.obs_rmv.update(rmv_batch)
-    obs = (obs - self.obs_rmv.mean) / np.sqrt(self.obs_rmv.var + self.eps)
-    obs = np.clip(obs, -self.clipob, self.clipob)
-    return obs
+    return self.normalize_observation(obs)
 
   def step(self, action):
     obs, rews, terminated, truncated, info = self.env.step(action)

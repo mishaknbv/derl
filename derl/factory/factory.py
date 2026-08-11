@@ -2,7 +2,6 @@
 from abc import ABC, abstractmethod
 import argparse
 from copy import deepcopy
-from inspect import ismethod
 from math import floor
 from derl import summary
 

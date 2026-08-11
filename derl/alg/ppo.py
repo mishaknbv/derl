@@ -93,8 +93,7 @@ class PPOLoss(Loss):
                        value_preds=torch.mean(values),
                        r_squared=r_squared(value_targets, values))
       for key, val in summaries.items():
-        summary.add_scalar(f"ppo/{key}", val, global_step=self.call_count)
-    value_loss = torch.mean(value_loss)
+        summary.add_scalar(f"{self.name}/{key}", val, global_step=self.call_count)
     return value_loss
 
   def __call__(self, data):
@@ -103,7 +102,7 @@ class PPOLoss(Loss):
     value_loss = self.value_loss(data, act)
     loss = policy_loss + self.value_loss_coef * value_loss
     if summary.should_record():
-      summary.add_scalar("ppo/loss", loss, global_step=self.call_count)
+      summary.add_scalar(f"{self.name}/loss", loss, global_step=self.call_count)
     self.call_count += 1
     return loss
 
