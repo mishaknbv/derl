@@ -16,6 +16,7 @@ from .models import (
     NatureCNNBase,
     NatureCNNModel,
     NoisyLinear,
+    LSTMCNN,
     SACModel,
     make_model,
 )
@@ -89,6 +90,7 @@ __all__ = [
     "Policy",
     "PrioritizedStorage",
     "RNDFactory",
+    "LSTMCNN",
     "RunnerWrapper",
     "SACFactory",
     "SACLoss",

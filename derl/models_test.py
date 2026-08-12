@@ -1,11 +1,12 @@
 # pylint: disable=missing-docstring, redefined-outer-name
 import collections
 
+import numpy as np
 import numpy.testing as nt
 import pytest
 import torch
 
-from derl.models import MuJoCoModel, NatureCNNBase, NatureCNNModel, NoisyLinear
+from derl.models import MuJoCoModel, NatureCNNBase, NatureCNNModel, NoisyLinear, LSTMCNN
 from derl.testing import assert_all_close, assert_orthogonal
 
 
@@ -83,6 +84,35 @@ def test_distributional_output_shape():
     dqn = NatureCNNModel(output_units=6, num_quantiles=200)
     outputs = dqn(torch.rand(32, 84, 84, 4))
     assert outputs.shape == torch.Size([32, 6, 200])
+
+
+@pytest.fixture
+def lstm_cnn():
+    return LSTMCNN(output_units=(6, 1))
+
+
+def test_lstm_cnn_params(lstm_cnn):
+    assert len(list(lstm_cnn.parameters())) == 12 + 4 + 1
+
+
+def test_lstm_cnn(lstm_cnn):
+    state = lstm_cnn.get_initial_state(3)
+    logits, value, state = lstm_cnn(
+        torch.rand(2, 3, 84, 84, 1), state, torch.zeros(2, 3, dtype=bool)
+    )
+    assert logits.shape == torch.Size([2, 3, 6])
+    assert value.shape == torch.Size([2, 3, 1])
+    assert state.shape == torch.Size([3, 512])
+
+
+def test_lstm_cnn_broadcast(lstm_cnn):
+    state = lstm_cnn.get_initial_state(1)
+    logits, value, state = lstm_cnn(
+        torch.rand(84, 84, 1), state, np.zeros(1, bool)
+    )
+    assert logits.shape == torch.Size([6])
+    assert value.shape == torch.Size([1])
+    assert state.shape == torch.Size([1, 512])
 
 
 def test_mujoco_model_params():
