@@ -1,14 +1,13 @@
 """ Script to record a video of a trained agent interacting with an env. """
 import argparse
-from functools import partial
+from collections import UserList
 import os
 import re
 import time
 
-import numpy as np
 import torch
 
-import cv2
+# pylint: disable=no-member
 import derl
 
 
@@ -40,27 +39,30 @@ def unwrap_recording(env):
   return env
 
 
+class FramesList(UserList):
+  """ Frames list is not cleared. """
+  def clear(self):
+    pass
+
+
 def record(env, policy, output_filepath, seed=0, nepisodes=1, fps=30):
   """ Records a video of a policy acting in an environment. """
   recording = unwrap_recording(env)
   recording.output_filepath = output_filepath
-  all_frames = []
-  had_ended_episodes = np.zeros(getattr(env.unwrapped, "nenvs", 1), bool)
+  recording.frames = FramesList()
+  recording.recording_period = float('inf')
   obs, _ = env.reset(seed=seed)
-  episodes = 0
-  while episodes < nepisodes:
+  while nepisodes > 0:
     act = policy.act(obs)
-    all_frames.extend(recording.frames)
-    recording.frames.clear()
     obs, _, terminated, truncated, info = env.step(act["actions"])
-    had_ended_episodes = terminated | truncated
-    if np.all(had_ended_episodes):
-      episodes += 1
-      if episodes < nepisodes:
+    recording.frames.clear()
+    if info.get("real_done", terminated | truncated):
+      nepisodes -= 1
+      if nepisodes > 0:
         obs, _ = env.reset()
-  recording.frames = all_frames
-  recording.save_video()
-  print(f"Wrote {len(all_frames)} frames ({nepisodes} episode(s)) "
+
+  recording.save_video(fps=fps)
+  print(f"Wrote {len(recording.frames)} frames ({nepisodes} episode(s)) "
         f"to {output_filepath}")
 
 

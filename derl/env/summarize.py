@@ -39,10 +39,11 @@ class VideoRecording(Wrapper):
       frames = frames.permute(1, 0, 4, 2, 3)
     summary.add_video(self.prefix, frames, global_step=self.step_count)
 
-  def save_file(self, filepath=None, fps=25):
+  def save_file(self, filepath=None, fps=30):
     """ Saves video to a file. """
     frames = [np.ascontiguousarray(frame, dtype=np.uint8)
               for frame in self.frames]
+    self.frames.clear()
     height, width, _ = frames[0].shape
     writer = cv2.VideoWriter(
         filepath or self.output_filepath,
@@ -61,8 +62,8 @@ class VideoRecording(Wrapper):
       self.save_tensorboard()
 
   def step(self, action):
-    obs, rew, terminated, truncated, info = self.env.step(action)
     frames = self.env.render()
+    obs, rew, terminated, truncated, info = self.env.step(action)
     if hasattr(self.unwrapped, "nenvs"):
       dones = np.asarray([
           info[i].get("real_done", terminated[i] or truncated[i])
