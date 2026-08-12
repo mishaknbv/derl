@@ -42,3 +42,7 @@ derl = "derl.scripts.derl:main"
 testpaths = ["derl"]
 norecursedirs = [".git", ".venv", "build", "logdir", "tmp", "runs", "testdata"]
 
+[tool.ruff.lint]
+ignore = [
+    "C408", # dict literal
+]
