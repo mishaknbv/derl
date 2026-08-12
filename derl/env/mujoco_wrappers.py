@@ -4,6 +4,8 @@ from copy import deepcopy
 import gymnasium as gym
 import numpy as np
 
+from derl.anneal import camel2snake
+
 
 class RunningMeanVar:
   """ Computes running mean and variance.
@@ -78,21 +80,23 @@ class Normalize(gym.Wrapper):
     self.gamma = gamma
     self.eps = eps
 
-  def save_wrapper(self, filename):
+  def save_wrapper(self, filename_prefix=None):
     """ Saves normalization stats to files. """
-    if filename.endswith("npz"):
-      filename = filename[:-3]
+    if filename_prefix is None:
+      filename_prefix = camel2snake(self.__class__.__name__)
     if self.obs_rmv is not None:
-      self.obs_rmv.save(f"{filename}-obs-rmv")
+      self.obs_rmv.save(f"{filename-prefix}-obs-rmv.npz")
     if self.ret_rmv is not None:
-      self.ret_rmv.save(f"{filename}-ret-rmv")
+      self.ret_rmv.save(f"{filename-prefix}-ret-rmv.npz")
 
-  def restore_wrapper(self, filename):
+  def restore_wrapper(self, filename_prefix=None):
     """ Restores normalization statistics from a file. """
+    if filename_prefix is None:
+      filename_prefix = camel2snake(self.__class__.__name__)
     if self.obs_rmv is not None:
-      self.obs_rmv.restore(f"{filename}-obs-rmv.npz")
+      self.obs_rmv.restore(f"{filename_prefix}-obs-rmv.npz")
     if self.ret_rmv is not None:
-      self.ret_rmv.restore(f"{filename}-ret-rmv.npz")
+      self.ret_rmv.restore(f"{filename_prefix}-ret-rmv.npz")
 
   def normalize_observation(self, obs):
     """ Normalizes the observation. """
