@@ -4,15 +4,18 @@ from math import floor
 from gymnasium import Wrapper
 import numpy as np
 import torch
+import cv2
 from derl import summary
 
 
 class VideoRecording(Wrapper):
   """ Records the interactions and saves them as a video. """
-  def __init__(self, env, recording_period, prefix=None, max_batch_size=8):
+  def __init__(self, env, recording_period, prefix=None,
+               output_filepath=None, max_batch_size=8):
     super().__init__(env)
     self.recording_period = recording_period
     self.prefix = prefix or self.env.spec.id
+    self.output_filepath = output_filepath
     self.max_batch_size = max_batch_size
     self.step_count = 0
     self.last_recording = -self.recording_period
@@ -25,7 +28,7 @@ class VideoRecording(Wrapper):
     """ Creates an instance that will write nlogs over nsteps. """
     return cls(env, floor(nsteps / nlogs))
 
-  def save_video(self):
+  def save_tensorboard(self):
     """ Saves the video of the last frames. """
     frames = np.stack(self.frames)
     self.frames.clear()  # optimize memo usage, np has a copy of frames, can del
@@ -35,6 +38,27 @@ class VideoRecording(Wrapper):
     elif frames.ndim == 5:
       frames = frames.permute(1, 0, 4, 2, 3)
     summary.add_video(self.prefix, frames, global_step=self.step_count)
+
+  def save_file(self, filepath=None, fps=25):
+    """ Saves video to a file. """
+    frames = [np.ascontiguousarray(frame, dtype=np.uint8)
+              for frame in self.frames]
+    height, width, _ = frames[0].shape
+    writer = cv2.VideoWriter(
+        filepath or self.output_filepath,
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        fps, (width, height)
+    )
+    for frame in frames:
+      writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+    writer.release()
+
+  def save_video(self, filepath=None, fps=25):
+    """ Saves video. """
+    if filepath is not None or self.output_filepath is not None:
+      self.save_file(filepath or self.output_filepath, fps)
+    else:
+      self.save_tensorboard()
 
   def step(self, action):
     obs, rew, terminated, truncated, info = self.env.step(action)
