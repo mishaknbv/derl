@@ -2,9 +2,11 @@
 #!/usr/bin/env python3
 from argparse import ArgumentParser
 import derl
+from derl.scripts.play import play
 
 
-def get_simple_parser(add_env_id=True, add_logdir=True, nlogs=1e5):
+def get_simple_parser(add_env_id=True, add_play=True,
+                      add_logdir=True, nlogs=1e5):
   """ Creates and returns a simple parser. """
   parser = ArgumentParser()
 
@@ -13,6 +15,7 @@ def get_simple_parser(add_env_id=True, add_logdir=True, nlogs=1e5):
       parser.add_argument(*args, **kwargs)
 
   maybe_add(add_env_id, "--env-id", required=True)
+  maybe_add(add_play, "--play", action="store_true")
   maybe_add(add_logdir, "--logdir", required=True)
   maybe_add(add_logdir, "--nlogs", type=float, default=nlogs)
   return parser
@@ -46,9 +49,13 @@ def main():
   factory_class = factories[args.factory]
 
   config = derl.factory.Config.make_for_factory(
-      factory_class, get_env_type(args.env_id), unknown_args)
-  derl.summary.make_writer(args.logdir)
+      factory_class, get_env_type(args.env_id),
+      [] if args.play else unknown_args)
   factory = factory_class(config)
+  if args.play:
+    play(args.env_id, factory, args.logdir, unknown_args)
+    return
+  derl.summary.make_writer(args.logdir)
   alg = factory.make(args.env_id, nlogs=args.nlogs)
   alg.learn()
 
