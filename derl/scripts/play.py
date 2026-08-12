@@ -64,10 +64,7 @@ def record(env, policy, output_filepath, seed=0, nepisodes=1, fps=30):
                 obs, _ = env.reset()
 
     recording.save_video(fps=fps)
-    print(
-        f"Wrote {len(recording.frames)} frames ({nepisodes} episode(s)) "
-        f"to {output_filepath}"
-    )
+    print(f"Wrote {len(recording.frames)} frames  to {output_filepath}")
 
 
 def is_new_model(model_filepath, last):

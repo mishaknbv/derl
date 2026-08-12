@@ -47,6 +47,8 @@ class VideoRecording(Wrapper):
         """Saves video to a file."""
         frames = [np.ascontiguousarray(frame, dtype=np.uint8) for frame in self.frames]
         self.frames.clear()
+        if frames[0].ndim == 4:
+            frames = [frame.squeeze(0) for frame in frames]
         height, width, _ = frames[0].shape
         writer = cv2.VideoWriter(
             filepath or self.output_filepath,

@@ -156,18 +156,25 @@ def nature_dqn_env(
     return nature_dqn_wrap(env, **kwargs)
 
 
+# pylint: disable=too-many-arguments,too-many-positional-arguments
 def nature_dqn_wrap(
     env,
     prefix=None,
     recording_period=None,
+    recording_filepath=None,
     summarize=True,
     episodic_life=True,
     max_random_actions=30,
-    clip_reward=True,
+    num_queue_frames=4,
 ):
     """Wraps given env as in nature DQN paper."""
     if recording_period is not None:
-        env = VideoRecording(env, recording_period, prefix=prefix or env.spec.id)
+        env = VideoRecording(
+            env,
+            recording_period,
+            prefix=prefix or env.spec.id,
+            output_filepath=recording_filepath,
+        )
     if summarize:
         env = Summarize.reward_summarizer(env, prefix=prefix or env.spec.id)
     if hasattr(env.unwrapped, "nenvs"):
@@ -180,10 +187,12 @@ def nature_dqn_wrap(
     env = MaxBetweenFrames(env)
     env = SkipFrames(env, 4)
     env = ImagePreprocessing(env, width=84, height=84, grayscale=True)
-    env = QueueFrames(env, 4)
-    if clip_reward:
-        env = ClipReward(env)
+    env = QueueFrames(env, num_queue_frames)
+    env = ClipReward(env)
     return env
+
+
+# pylint: enable=too-many-arguments
 
 
 def mujoco_env(env_id, nenvs=None, seed=None, render_mode="rgb_array", **kwargs):
