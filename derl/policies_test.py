@@ -2,7 +2,7 @@
 import numpy as np
 import torch
 
-from derl.models import MuJoCoModel, NatureCNNModel
+from derl.models import LSTMCNN, MuJoCoModel, NatureCNNModel
 from derl.policies import ActorCriticPolicy, EpsilonGreedyPolicy
 from derl.testing import assert_all_close
 
@@ -16,6 +16,18 @@ def test_actor_critic_categorical():
     assert act["actions"] == np.array(1)
     assert_all_close(act["log_prob"], np.array(-1.721119), rtol=1e-6)
     assert_all_close(act["values"], np.array([0.257305294]), rtol=1e-5)
+
+
+def test_actor_critic_recurrent():
+    model = LSTMCNN((6, 1))
+    policy = ActorCriticPolicy(model)
+    state = policy.get_initial_state(1)
+    act = policy.act(torch.randn(84, 84, 1), state, torch.zeros(1, dtype=bool))
+    assert list(act.keys()) == ["actions", "log_prob", "values", "policy_state"]
+    assert act["actions"] == np.array(5)
+    assert_all_close(act["log_prob"], np.array(-1.7282835), rtol=1e-6)
+    assert_all_close(act["values"], np.array(0.09740922), rtol=1e-6)
+    assert act["policy_state"].shape ==  (1, 512)
 
 
 def test_actor_critic_normal():

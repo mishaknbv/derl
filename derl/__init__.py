@@ -9,6 +9,7 @@ from .anneal import (
 )
 from .factory import *
 from .models import (
+    LSTMCNN,
     MLP,
     SACMLP,
     ContinuousQValueModel,
@@ -16,7 +17,6 @@ from .models import (
     NatureCNNBase,
     NatureCNNModel,
     NoisyLinear,
-    LSTMCNN,
     SACModel,
     make_model,
 )
@@ -50,6 +50,7 @@ __all__ = [
     "A2C",
     "DQN",
     "GAE",
+    "LSTMCNN",
     "MLP",
     "PPO",
     "RND",
@@ -90,7 +91,6 @@ __all__ = [
     "Policy",
     "PrioritizedStorage",
     "RNDFactory",
-    "LSTMCNN",
     "RunnerWrapper",
     "SACFactory",
     "SACLoss",

@@ -21,6 +21,6 @@ def seed_random():
 
 @pytest.fixture(autouse=True)
 def disable_summaries(monkeypatch):
-    """ Disables summary recording during tests. """
+    """Disables summary recording during tests."""
     summary.stop_recording()
     monkeypatch.setattr(summary, "should_record", lambda *args, **kwargs: False)
