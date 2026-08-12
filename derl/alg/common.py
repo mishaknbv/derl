@@ -100,11 +100,21 @@ class Alg:
     loss = self.trainer.step(self, data)
     return loss
 
-  def learn(self, model_filename="model.pt"):
+  def dump_model(self, model_filename="model-{step}.pt"):
+    """ Saves the model to the file. """
+    model_filename = model_filename.format(step=self.runner.step_count)
+    model_filepath = os.path.join(summary.writer.log_dir, model_filename)
+    torch.save(self.model.state_dict(), model_filepath)
+
+  def learn(self, model_dump_period=20e6, model_filename="model-{step}.pt"):
     """ Performs learning with this algorithm. """
+    self.runner.policy.model.compile()
+    model_dump_step = -model_dump_period
     with tqdm(total=len(self.runner)) as pbar:
       for data in self.runner.run():
         pbar.update(self.runner.step_count - pbar.n)
         self.step(data)
-    logdir = summary.writer.log_dir
-    torch.save(self.model.state_dict(), os.path.join(logdir, model_filename))
+        if self.runner.step_count - model_dump_step >= model_dump_period:
+          self.dump_model(model_filename)
+          model_dump_step = model_dump_step + model_dump_period
+    self.dump_model(model_filename)
