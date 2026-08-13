@@ -37,7 +37,7 @@ jobs:
       continue-on-error: true
       run: |
         pylint derl
-    - name: Line with ruff
+    - name: Lint with ruff
       run: |
         ruff check derl
     - name: Run tests
