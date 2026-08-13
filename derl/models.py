@@ -342,7 +342,7 @@ class LSTMCNN(nn.Module):
         hidden, cell = self.lstm_for_loop(features, states, resets)
         flat = torch.reshape(hidden, (-1, self.hidden_size))
         outputs = [
-            torch.reshape(layer(flat), hidden.shape[:2] + (layer.out_features,))
+            torch.reshape(layer(flat), hidden.shape[:2] + (-1,))
             for layer in self.output_layers
         ]
         new_states = torch.cat([hidden[-1], cell], 1)
@@ -445,7 +445,8 @@ def vector_size(shape):
     return shape[0]
 
 
-def make_model(observation_space, action_space, other_outputs=None, **kwargs):
+def make_model(observation_space, action_space, other_outputs=None,
+               recurrent=False, **kwargs):
     """Creates default model for given observation and action spaces."""
     if isinstance(other_outputs, int) or other_outputs is None:
         other_outputs = [other_outputs] if other_outputs is not None else []
@@ -460,6 +461,9 @@ def make_model(observation_space, action_space, other_outputs=None, **kwargs):
         and len(observation_space.shape) == 3
     ):
         output_units = [action_space.n, *other_outputs]
+        if recurrent:
+            return LSTMCNN(input_shape=observation_space.shape,
+                           output_units=output_units, **kwargs)
         return NatureCNNModel(
             input_shape=observation_space.shape, output_units=output_units, **kwargs
         )

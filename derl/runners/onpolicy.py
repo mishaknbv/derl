@@ -61,10 +61,15 @@ class IterateWithMinibatches(RunnerWrapper):
                 mbsize = sample_size // self.num_minibatches
                 for start in range(0, sample_size, mbsize):
                     indices = np.arange(start, min(start + mbsize, sample_size))
-                    yield dict(
+                    result = dict(
                         (key, val[indices]) if key != "state" else (key, val)
                         for key, val in interactions.items()
                     )
+                    if start and "policy_state" in result:
+                        result["state"]["policy_start_state"] = (
+                            interactions["policy_state"][start - 1]
+                        )
+                    yield result
 
 
 def ppo_runner_wrap(runner, gamma=0.99, lambda_=0.95, num_epochs=3, num_minibatches=4):
@@ -74,7 +79,8 @@ def ppo_runner_wrap(runner, gamma=0.99, lambda_=0.95, num_epochs=3, num_minibatc
     if not policy.is_recurrent() and getattr(env.unwrapped, "nenvs", None):
         transforms.append(MergeTimeBatch())
     runner = TransformInteractions(runner, transforms)
-    runner = IterateWithMinibatches(runner, num_epochs, num_minibatches)
+    runner = IterateWithMinibatches(runner, num_epochs, num_minibatches,
+                                    shuffle_before_epoch=not policy.is_recurrent())
     runner = TransformInteractions(runner, [NormalizeAdvantages()])
     return runner
 

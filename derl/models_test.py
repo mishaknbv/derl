@@ -6,7 +6,7 @@ import numpy.testing as nt
 import pytest
 import torch
 
-from derl.models import MuJoCoModel, NatureCNNBase, NatureCNNModel, NoisyLinear, LSTMCNN
+from derl.models import LSTMCNN, MuJoCoModel, NatureCNNBase, NatureCNNModel, NoisyLinear
 from derl.testing import assert_all_close, assert_orthogonal
 
 
