@@ -33,10 +33,8 @@ class IntrinsicReward(Normalize):
                      clipobs=clipobs,
                      cliprew=np.inf,
                      gamma=intrinsic_gamma)
-    self.obs_rmv = (
-        RunningMeanVar(shape=self.observation_space.shape[:-1] + (1,))
-        if normalize else None
-    )
+    height, width, _ = self.observation_space.shape
+    self.obs_rmv = RunningMeanVar(shape=(height, width, 1)) if normalize else None
     self.predictor = predictor
     self.target = target
 
@@ -212,8 +210,8 @@ class RND(PPO):
     ):
     super().__init__(runner, trainer, **kwargs)
     observation_shape = runner.env.observation_space.shape
-    observation_shape = observation_shape[:-1] + (1,)
-    self.target = NatureCNNBase(input_shape=observation_shape,
+    height, width, _ = observation_space.shape
+    self.target = NatureCNNBase(input_shape=(height, width, 1),
                                 activation=nn.LeakyReLU).to(get_device())
     self.predictor = PredictorModel(
         deepcopy(self.target),
