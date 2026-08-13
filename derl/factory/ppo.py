@@ -21,6 +21,7 @@ class PPOFactory(Factory):
                 "num-train-steps": 10e6,
                 "num-recordings": 10,
                 "nenvs": 8,
+                "recurrent": dict(action="store_true"),
                 "num-runner-steps": 128,
                 "gamma": 0.99,
                 "lambda_": 0.95,
@@ -52,10 +53,20 @@ class PPOFactory(Factory):
         }
         return defaults.get(args_type)
 
+    def make_env(self, env_id, **kwargs):
+        self.config |= kwargs
+        recurrent = getattr(self.config, "recurrent", False)
+        env = super().make_env(
+            env_id, nenvs=self.nenvs, num_queue_frames=1 if recurrent else 4
+        )
+        return env
+
     def make_runner(self, env, model=None, nlogs=1e5, **kwargs):
         self.config |= kwargs
         if model is None:
-            model = make_model(env.observation_space, env.action_space, 1)
+            recurrent = getattr(self.config, "recurrent", False)
+            model = make_model(env.observation_space, env.action_space, 1,
+                               recurrent=recurrent)
         policy = ActorCriticPolicy(model)
         runner = make_ppo_runner(
             env,
