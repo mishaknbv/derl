@@ -20,8 +20,9 @@ Currently implemented algorithms:
 - A2C
 - PPO
 - SAC
-- DQN (n-step, double, dueling, with prioritized experience replay,
-with noisy networks for exploration)
+- DQN (distributional: QR-DQN, n-step, double, dueling,
+with prioritized experience replay, with noisy networks for exploration)
+- Random Network Distillation
 
 ## Installation
 
