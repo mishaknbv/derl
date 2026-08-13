@@ -8,6 +8,7 @@ import torch
 
 from derl import summary
 
+
 @pytest.fixture(autouse=True)
 def seed_random():
     """Seeds all randomness sources and enables deterministic algorithms."""
