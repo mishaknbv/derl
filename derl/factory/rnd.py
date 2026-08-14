@@ -62,7 +62,7 @@ class RNDFactory(PPOFactory):
     return runner
 
   def make_alg(self, runner, trainer, **kwargs):
-    self.config |= kwargs | {"rnd": False}
+    self.config |= kwargs
     rnd = RND(runner, trainer,
               intrinsic_gamma=self.intrinsic_gamma,
               cliprange=self.cliprange,

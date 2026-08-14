@@ -203,6 +203,7 @@ class RND(PPO):
       self, runner, trainer,
       intrinsic_gamma=0.99,
       num_extra_layers=2,
+      distill_lr=1e-3,
       distill_loss_coef=1.,
       prob_distill=0.25,
       num_warmup_steps=100,
@@ -210,7 +211,7 @@ class RND(PPO):
     ):
     super().__init__(runner, trainer, **kwargs)
     observation_shape = runner.env.observation_space.shape
-    height, width, _ = observation_space.shape
+    height, width, _ = observation_shape
     self.target = NatureCNNBase(input_shape=(height, width, 1),
                                 activation=nn.LeakyReLU).to(get_device())
     self.predictor = PredictorModel(
@@ -222,7 +223,7 @@ class RND(PPO):
     reinitialize(self.target, self.runner.policy.model.init_fn)
     self.trainer.optimizer.add_param_group({
         "params": self.predictor.parameters(),
-        "lr": self.trainer.optimizer.param_groups[0]["lr"],
+        "lr": distill_lr,
     })
 
     runner.unwrapped.env = IntrinsicReward(
@@ -246,7 +247,11 @@ class RND(PPO):
         torch.square(target_preds - model_preds).reshape(batch_size, -1), -1)
 
     sample = torch.rand(batch_size).to(intrinsic_reward.device)
-    distill_loss = torch.mean((sample < self.prob_distill) * intrinsic_reward)
+    mask = sample < self.prob_distill
+    distill_loss = (
+        torch.sum(mask * intrinsic_reward)
+        / torch.maximum(torch.tensor(1.), torch.sum(mask))
+    )
     if summary.should_record():
       summary.add_scalar(f"{self.name}/distill_loss", distill_loss,
                          global_step=self.loss_fn.call_count)
@@ -260,5 +265,6 @@ class RND(PPO):
             model_filename="model-{step}.pt"):
     runner = self.runner.run()
     for _ in trange(self.num_warmup_steps, leave=False):
-      next(runner)
+      if next(runner, None) is None:
+        break
     super().learn(model_dump_period, model_filename)

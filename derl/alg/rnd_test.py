@@ -26,7 +26,7 @@ class DummyEnv(gym.Env):
   nenvs = 1
 
   def __init__(self):
-    self.observation_space = gym.spaces.Box(0., 1., shape=(4,))
+    self.observation_space = gym.spaces.Box(0., 1., shape=(3,))
     self.action_space = gym.spaces.Discrete(2)
 
   def step(self, action):
