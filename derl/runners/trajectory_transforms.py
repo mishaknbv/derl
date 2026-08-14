@@ -50,6 +50,7 @@ class GAE:
 
         rewards = trajectory["rewards"]
         terminations = trajectory["terminations"]
+        resets = trajectory["terminations"] | trajectory["truncations"]
         values = trajectory["values"]
 
         # Values might have an additional last dimension of size 1 as outputs of
@@ -67,8 +68,8 @@ class GAE:
             )
 
         observation = trajectory["state"]["latest_observations"]
-        state = trajectory["state"].get("policy_state", None)
-        last_value = self.policy.act(observation, state=state, update_state=False)[
+        state = trajectory.get("policy_state", [None])[-1]
+        last_value = self.policy.act(observation, state=state, resets=resets[-1:])[
             "values"
         ]
 

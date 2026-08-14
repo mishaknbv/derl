@@ -35,10 +35,13 @@ class EnvRunner:
         """Interacts with the environment starting from obs for horizon steps."""
         if obs is None:
             obs, _ = self.env.reset()
+        policy_state = self.policy.get_initial_state(self.nenvs or 1)
+        resets = np.zeros(self.nenvs or 1, bool)
         while not self.is_exhausted() or not np.all(self.done_after_exhausted):
+            start_policy_state = policy_state
             interactions = defaultdict(list)
             for _ in range(self.horizon):
-                act = self.policy.act(obs)
+                act = self.policy.act(obs, policy_state, resets)
                 interactions["observations"].append(obs)
                 if "actions" not in act:
                     raise ValueError(
@@ -56,6 +59,9 @@ class EnvRunner:
                 interactions["infos"].append(info)
                 interactions["next_observations"].append(new_obs)
 
+                policy_state = act.get("policy_state", None)
+                resets[:] = terminations | truncations
+
                 if self.is_exhausted():
                     self.done_after_exhausted |= terminations | truncations
 
@@ -66,7 +72,8 @@ class EnvRunner:
                 else:
                     obs = new_obs
 
-            interactions["state"] = dict(latest_observations=obs)
+            interactions["state"] = dict(latest_observations=obs,
+                                         policy_start_state=start_policy_state)
             self.step_count += self.horizon * (self.nenvs or 1)
             yield dict(interactions)
 

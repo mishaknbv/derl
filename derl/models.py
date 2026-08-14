@@ -162,8 +162,16 @@ def init_weights(layer, weight_initializer, bias_initializer):
     """Initializers weights and biases of a given layer."""
     if hasattr(layer, "weight"):
         weight_initializer(layer.weight)
-    if hasattr(layer, "bias"):
+    if hasattr(layer, "weight_ih"):
+        weight_initializer(layer.weight_ih)
+    if hasattr(layer, "weight_hh"):
+        weight_initializer(layer.weight_hh)
+    if hasattr(layer, "bias") and not isinstance(layer.bias, bool):
         bias_initializer(layer.bias)
+    if hasattr(layer, "bias_ih"):
+        bias_initializer(layer.bias_ih)
+    if hasattr(layer, "bias_hh"):
+        bias_initializer(layer.bias_hh)
 
 
 def orthogonal_init(layer):
@@ -173,31 +181,38 @@ def orthogonal_init(layer):
     )
 
 
+def broadcast(ndims, *tensors):
+    """ Broadcasts tensors to dimensionality. """
+    input_ndim = tensors[0].ndim
+    for i, tnsr in enumerate(tensors):
+        if tnsr.ndim != input_ndim:
+            raise ValueError(
+                "for broadcasting all inputs must have the same "
+                "number of dimensions, got "
+                f"tensors[0].shape={tensors[0].shape}, "
+                f"tensors[{i}].shape={tnsr.shape}"
+            )
+    expand_dims = ndims - input_ndim
+    tensors = tuple(tnsr[(None,) * expand_dims] for tnsr in tensors)
+    return expand_dims, *tensors
+
+
+def unbroadcast(ndims, output):
+    """ Squeezes tensors along the first ndims. """
+    if isinstance(output, (tuple, list)):
+        return type(output)(unbroadcast(ndims, out) for out in output)
+    return torch.reshape(output, output.shape[ndims:])
+
+
 def broadcast_inputs(ndims):
     """Broadcast inputs to specified number of dims and then back."""
 
     def decorator(forward):
         @wraps(forward)
         def wrapped(self, *inputs):
-            input_ndim = inputs[0].ndim
-            for i, inpt in enumerate(inputs):
-                if inpt.ndim != input_ndim:
-                    raise ValueError(
-                        "for broadcasting all inputs must have the same "
-                        "number of dimensions, got "
-                        f"inputs[0].shape={inputs[0].shape}, "
-                        f"inputs[{i}].shape={inpt.shape}"
-                    )
-            expand_dims = ndims - input_ndim
-            inputs = tuple(inpt[(None,) * expand_dims] for inpt in inputs)
+            expand_dims, *inputs = broadcast(ndims, *inputs)
             outputs = forward(self, *inputs)
-
-            def unbroadcast(output):
-                if isinstance(output, (tuple, list)):
-                    return type(output)(unbroadcast(out) for out in output)
-                return torch.reshape(output, output.shape[expand_dims:])
-
-            return unbroadcast(outputs)
+            return unbroadcast(expand_dims, outputs)
 
         return wrapped
 
@@ -259,6 +274,112 @@ class NatureCNNModel(nn.Module):
         if self.single_output:
             outputs = outputs[0]
         return outputs
+
+
+class LSTMModel(nn.Module):
+    """ Model with LSTM.
+
+    Observations are expected to have shape
+    `(time, batch) + observation_shape`, the recurrent state has shape
+    `(batch,) + state_shape` (concatenated cell and hidden LSTM states), and
+    the resets (done flags) have shape `(time, batch)`.
+    """
+
+    def __init__(
+        self,
+        base,
+        output_units,
+        hidden_size=256,
+        logstd=False,
+        init_fn=orthogonal_init,
+        activation=nn.ReLU,
+        **base_kwargs,
+    ):
+        super().__init__()
+        self.base = base(activation=activation, **base_kwargs)
+        if not isinstance(output_units, (tuple, list)):
+            output_units = [output_units]
+        self.output_units = list(output_units)
+        in_units = list(self.base.children())[-1].out_features
+        self.lstm_cell = nn.modules.rnn.LSTMCell(in_units, hidden_size)
+        self.activation = activation()
+        self.output_layers = nn.ModuleList(
+            nn.Linear(hidden_size, out_units) for out_units in self.output_units
+        )
+        self.initial_state = nn.Parameter(torch.zeros(2 * hidden_size))
+        self.init_fn = init_fn
+        if self.init_fn:
+            self.apply(self.init_fn)
+        self.logstd = nn.Parameter(torch.zeros(output_units[0])) if logstd else None
+        self.to(get_device())
+
+    @classmethod
+    def make_cnn(cls, input_shape, output_units, **kwargs):
+        """ Creates LSTM model with NatureCNNBase as base. """
+        return cls(base=NatureCNNBase, input_shape=input_shape,
+                   output_units=output_units, **kwargs)
+
+    @classmethod
+    def make_mlp(cls, observation_dim, output_units, logstd=True,
+                 hidden_features=(64,), **kwargs):
+        """ Creates LSTM model with MLP base. """
+        mlp = partial(MLP, out_features=hidden_features[-1],
+                      hidden_features=hidden_features)
+        return cls(in_features=observation_dim, base=mlp,
+                   output_units=output_units, logstd=logstd, **kwargs)
+
+    @property
+    def hidden_size(self):
+        """Hidden size of the lstm."""
+        return self.lstm_cell.hidden_size
+
+    def get_initial_state(self, batch_size):
+        """Returns the initial state of the RNN."""
+        return torch.repeat_interleave(self.initial_state[None], batch_size, 0)
+
+    def lstm_for_loop(self, features, state, resets):
+        """For loop of LSTM."""
+        time, batch_size, _ = features.shape
+        hx, cx = torch.split(state, self.hidden_size, 1)
+        h0, c0 = torch.split(self.get_initial_state(batch_size), self.hidden_size, 1)
+        outputs = []
+        for t in range(time):
+            hx = hx * ~resets[t, ..., None] + resets[t, ..., None] * h0
+            cx = cx * ~resets[t, ..., None] + resets[t, ..., None] * c0
+            hx, cx = self.lstm_cell(features[t], (hx, cx))
+            outputs.append(hx)
+        new_states = torch.cat([outputs[-1], cx], 1)
+        return torch.stack(outputs, 0), new_states
+
+    @collocate_inputs(device=False, dtype=False)
+    def forward(self, observations, states, resets):
+        """Forward propagates given the observations, recurrent states and resets."""
+        if observations.dtype == torch.float64:
+            observations = observations.to(torch.float32)
+        observations, states, resets = (
+            t.to(next(self.parameters()).device) for t in (observations, states, resets)
+        )
+        expand_dims = 5 if any(isinstance(m, nn.Conv2d) for m in self.modules()) else 3
+        expand_dims, observations = broadcast(expand_dims, observations)
+        time, batch_size = observations.shape[:2]
+        features = self.activation(self.base(
+            torch.reshape(observations, (-1,) + observations.shape[2:])
+        ))
+        features = torch.reshape(features, (time, batch_size, -1))
+        hidden, new_states  = self.lstm_for_loop(features, states, resets)
+        flat = torch.reshape(hidden, (-1, self.hidden_size))
+        outputs = [
+            torch.reshape(layer(flat), hidden.shape[:2] + (-1,))
+            for layer in self.output_layers
+        ]
+        mean, *other = unbroadcast(expand_dims, outputs)
+        if self.logstd is None:
+            return mean, *other, new_states
+        std = torch.exp(self.logstd)[None, None]
+        std = torch.repeat_interleave(std, batch_size, 1)
+        std = torch.repeat_interleave(std, time, 0)
+        std = unbroadcast(expand_dims, std)
+        return mean, std, *other, new_states
 
 
 def pairwise(iterable):
@@ -357,7 +478,8 @@ def vector_size(shape):
     return shape[0]
 
 
-def make_model(observation_space, action_space, other_outputs=None, **kwargs):
+def make_model(observation_space, action_space, other_outputs=None,
+               recurrent=False, **kwargs):
     """Creates default model for given observation and action spaces."""
     if isinstance(other_outputs, int) or other_outputs is None:
         other_outputs = [other_outputs] if other_outputs is not None else []
@@ -372,6 +494,10 @@ def make_model(observation_space, action_space, other_outputs=None, **kwargs):
         and len(observation_space.shape) == 3
     ):
         output_units = [action_space.n, *other_outputs]
+        if recurrent:
+            return LSTMModel.make_cnn(
+                input_shape=observation_space.shape, output_units=output_units, **kwargs
+            )
         return NatureCNNModel(
             input_shape=observation_space.shape, output_units=output_units, **kwargs
         )
@@ -382,6 +508,9 @@ def make_model(observation_space, action_space, other_outputs=None, **kwargs):
         else action_space.n
     )
     output_units = [action_dim, *other_outputs]
+    if recurrent:
+        return LSTMModel.make_mlp(observation_dim=observation_dim,
+                                  output_units=output_units, **kwargs)
     return MuJoCoModel(
         observation_dim=observation_dim,
         output_units=output_units,

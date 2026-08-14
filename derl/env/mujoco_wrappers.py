@@ -77,6 +77,7 @@ class Normalize(gym.Wrapper):
     A vectorized wrapper that normalizes the observations
     and returns from an environment.
     """
+
     def __init__(
         self, env, obs=True, ret=True, clipobs=10.0, cliprew=10.0, gamma=0.99, eps=1e-8
     ):

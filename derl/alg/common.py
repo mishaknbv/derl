@@ -112,7 +112,8 @@ class Alg:
 
     def learn(self, model_dump_period=20e6, model_filename="model-{step}.pt"):
         """Performs learning with this algorithm."""
-        self.runner.policy.model.compile()
+        if not self.runner.policy.is_recurrent():
+            self.runner.policy.model.compile()
         model_dump_step = -model_dump_period
         with tqdm(total=len(self.runner)) as pbar:
             for data in self.runner.run():

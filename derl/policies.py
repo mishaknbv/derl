@@ -16,15 +16,12 @@ class Policy(ABC):
         """Returns true if policy is recurrent."""
         return False
 
-    def get_state(self):
+    def get_initial_state(self, batch_size):
         """Returns current policy state."""
-        return
-
-    def reset(self):
-        """Resets the state."""
+        _ = batch_size
 
     @abstractmethod
-    def act(self, inputs, state=None, update_state=True, training=False):
+    def act(self, inputs, state=None, resets=None, training=False):
         """Returns `dict` of all the outputs of the policy.
 
         If `training=False`, then inputs can be a batch of observations
@@ -49,22 +46,41 @@ class ActorCriticPolicy(Policy):
 
     def __init__(self, model, distribution=None):
         self.model = model
+        self.state = None
         self.distribution = distribution
 
-    def act(self, inputs, state=None, update_state=True, training=False):
-        # TODO: support recurrent policies.
-        _ = update_state
-        if state is not None:
-            raise NotImplementedError()
+    def is_recurrent(self):
+        return hasattr(self.model, "get_initial_state")
+
+    def get_initial_state(self, batch_size):
+        """Returns initial state of the recurrent model."""
+        if not self.is_recurrent():
+            return None
+        return self.model.get_initial_state(batch_size)
+
+    def act(self, inputs, state=None, resets=None, training=False):
         if training:
+            assert state is None and resets is None
             observations = inputs["observations"]
+            state = inputs["state"]["policy_start_state"]
+            resets = inputs["terminations"] | inputs["truncations"]
         else:
             observations = inputs
-
-        *distribution_inputs, values = self.model(observations)
+        if self.is_recurrent():
+            if state is None or resets is None:
+                raise ValueError(
+                    f"{self} is a recurrent policy, but {state=}; "
+                    f"{resets=} when both must not be None"
+                )
+            *distribution_inputs, values, state = self.model(
+                observations, state, resets
+            )
+        else:
+            *distribution_inputs, values = self.model(observations)
         if self.distribution is None:
             if len(distribution_inputs) == 1:
-                distribution = Categorical(logits=distribution_inputs[0])
+                (logits,) = distribution_inputs
+                distribution = Categorical(logits=logits)
             elif len(distribution_inputs) == 2:
                 distribution = multivariate_normal_diag(*distribution_inputs)
             else:
@@ -80,11 +96,14 @@ class ActorCriticPolicy(Policy):
             return {"distribution": distribution, "values": values}
         actions = distribution.sample()
         log_prob = distribution.log_prob(actions)
-        return {
+        result = {
             "actions": _np(actions),
             "log_prob": _np(log_prob),
             "values": _np(values),
         }
+        if self.is_recurrent():
+            result["policy_state"] = _np(state)
+        return result
 
 
 def tanh_normal_diag(loc, scale, axis=1, cache_size=1):
@@ -100,8 +119,8 @@ class SACPolicy(Policy):
     def __init__(self, model):
         self.model = model
 
-    def act(self, inputs, state=None, update_state=True, training=False):
-        _ = update_state
+    def act(self, inputs, state=None, resets=None, training=False):
+        _ = resets
         if state is not None:
             raise NotImplementedError("SACPolicy does not support state inputs")
         if not training:
@@ -163,7 +182,7 @@ class EpsilonGreedyPolicy(Policy):
 
         return cls(model, epsilon, nactions, qvalues_from_preds)
 
-    def act(self, inputs, state=None, update_state=True, training=False):
+    def act(self, inputs, state=None, resets=None, training=False):
         if state is not None:
             raise ValueError("epsilon greedy policy does not support state inputs")
 
