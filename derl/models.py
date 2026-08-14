@@ -292,15 +292,17 @@ class LSTMModel(nn.Module):
         hidden_size=256,
         logstd=False,
         init_fn=orthogonal_init,
+        activation=nn.ReLU,
         **base_kwargs,
     ):
         super().__init__()
-        self.base = base(**base_kwargs)
+        self.base = base(activation=activation, **base_kwargs)
         if not isinstance(output_units, (tuple, list)):
             output_units = [output_units]
         self.output_units = list(output_units)
         in_units = list(self.base.children())[-1].out_features
         self.lstm_cell = nn.modules.rnn.LSTMCell(in_units, hidden_size)
+        self.activation = activation()
         self.output_layers = nn.ModuleList(
             nn.Linear(hidden_size, out_units) for out_units in self.output_units
         )
@@ -360,9 +362,9 @@ class LSTMModel(nn.Module):
         expand_dims = 5 if any(isinstance(m, nn.Conv2d) for m in self.modules()) else 3
         expand_dims, observations = broadcast(expand_dims, observations)
         time, batch_size = observations.shape[:2]
-        features = self.base(
+        features = self.activation(self.base(
             torch.reshape(observations, (-1,) + observations.shape[2:])
-        )
+        ))
         features = torch.reshape(features, (time, batch_size, -1))
         hidden, new_states  = self.lstm_for_loop(features, states, resets)
         flat = torch.reshape(hidden, (-1, self.hidden_size))

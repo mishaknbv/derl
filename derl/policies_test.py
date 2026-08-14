@@ -25,8 +25,8 @@ def test_actor_critic_recurrent():
     act = policy.act(torch.randn(84, 84, 1), state, torch.zeros(1, dtype=bool))
     assert list(act.keys()) == ["actions", "log_prob", "values", "policy_state"]
     assert act["actions"] == np.array(5)
-    assert_all_close(act["log_prob"], np.array(-1.7282835), rtol=1e-6)
-    assert_all_close(act["values"], np.array(0.09740922), rtol=1e-6)
+    assert_all_close(act["log_prob"], np.array(-1.736725), rtol=1e-6)
+    assert_all_close(act["values"], np.array(0.1169143766), rtol=1e-6)
     assert act["policy_state"].shape ==  (1, 512)
 
 
