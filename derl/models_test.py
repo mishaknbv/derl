@@ -1,133 +1,197 @@
 # pylint: disable=missing-docstring, redefined-outer-name
 import collections
 
+import numpy as np
 import numpy.testing as nt
 import pytest
 import torch
 
-from derl.models import (NoisyLinear, NatureCNNBase,
-                         NatureCNNModel, MuJoCoModel)
+from derl.models import (
+    LSTMModel,
+    MuJoCoModel,
+    NatureCNNBase,
+    NatureCNNModel,
+    NoisyLinear,
+)
 from derl.testing import assert_all_close, assert_orthogonal
 
 
 def test_noisy_linear_parameters():
-  layer = NoisyLinear(3, 4)
-  assert len(list(layer.parameters())) == 4
+    layer = NoisyLinear(3, 4)
+    assert len(list(layer.parameters())) == 4
 
 
 def test_noisy_linear_call():
-  layer = NoisyLinear(3, 4)
-  assert layer(torch.randn(2, 3)).shape == (2, 4)
+    layer = NoisyLinear(3, 4)
+    assert layer(torch.randn(2, 3)).shape == (2, 4)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="Requires cuda")
 def test_noisy_linear_cuda_call():
-  layer = NoisyLinear(3, 4)
-  layer.to("cuda")
-  assert layer(torch.randn(2, 3).to("cuda")).shape == (2, 4)
+    layer = NoisyLinear(3, 4)
+    layer.to("cuda")
+    assert layer(torch.randn(2, 3).to("cuda")).shape == (2, 4)
 
 
 @pytest.fixture
 def dqn_base():
-  dqn_base = NatureCNNBase()
-  dqn_base.load_state_dict(torch.load("testdata/models/dqn-base.pt"))
-  return dqn_base
+    dqn_base = NatureCNNBase()
+    dqn_base.load_state_dict(torch.load("testdata/models/dqn-base.pt"))
+    return dqn_base
 
 
 def test_dqn_base_params(dqn_base):
-  assert len(list(dqn_base.parameters())) == 8
+    assert len(list(dqn_base.parameters())) == 8
 
 
 def test_dqn_base_noisy_params():
-  base = NatureCNNBase(noisy=True)
-  assert len(list(base.parameters())) == 10
+    base = NatureCNNBase(noisy=True)
+    assert len(list(base.parameters())) == 10
 
 
 def test_dqn_base_call(dqn_base):
-  inputs = torch.rand(32, 84, 84, 4)
-  outputs = dqn_base(inputs)
-  expected = torch.load("testdata/models/dqn-base-outputs.pt")
-  assert_all_close(outputs, expected, atol=1e-6)
+    inputs = torch.rand(32, 84, 84, 4)
+    outputs = dqn_base(inputs)
+    expected = torch.load("testdata/models/dqn-base-outputs.pt")
+    assert_all_close(outputs, expected, atol=1e-6)
 
 
 @pytest.fixture
 def nature_cnn_actor_critic():
-  dqn = NatureCNNModel(output_units=(4, 1))
-  dqn.to("cpu")
-  return dqn
+    dqn = NatureCNNModel(output_units=(4, 1))
+    dqn.to("cpu")
+    return dqn
 
 
 def test_nature_cnn_params(nature_cnn_actor_critic):
-  dqn = nature_cnn_actor_critic
-  nweights = nbiases = 0
-  for module in dqn.modules():
-    if hasattr(module, "bias"):
-      nt.assert_equal(module.bias.detach().numpy(), 0.)
-      nbiases += 1
-    if hasattr(module, "weight"):
-      assert_orthogonal(module.weight.detach().numpy())
-      nweights += 1
-  assert nweights == 6
-  assert nbiases == 6
+    dqn = nature_cnn_actor_critic
+    nweights = nbiases = 0
+    for module in dqn.modules():
+        if hasattr(module, "bias"):
+            nt.assert_equal(module.bias.detach().numpy(), 0.0)
+            nbiases += 1
+        if hasattr(module, "weight"):
+            assert_orthogonal(module.weight.detach().numpy())
+            nweights += 1
+    assert nweights == 6
+    assert nbiases == 6
 
 
 def test_nature_cnn_broadcast():
-  dqn = NatureCNNModel(output_units=(4, 1))
-  inputs = torch.rand(84, 84, 4)
-  outputs = dqn(inputs)
-  assert len(outputs) == 2
-  assert outputs[0].shape == torch.Size((4,))
-  assert outputs[1].shape == torch.Size((1,))
+    dqn = NatureCNNModel(output_units=(4, 1))
+    inputs = torch.rand(84, 84, 4)
+    outputs = dqn(inputs)
+    assert len(outputs) == 2
+    assert outputs[0].shape == torch.Size((4,))
+    assert outputs[1].shape == torch.Size((1,))
 
 
 def test_distributional_output_shape():
-  dqn = NatureCNNModel(output_units=6, num_quantiles=200)
-  outputs = dqn(torch.rand(32, 84, 84, 4))
-  assert outputs.shape == torch.Size([32, 6, 200])
+    dqn = NatureCNNModel(output_units=6, num_quantiles=200)
+    outputs = dqn(torch.rand(32, 84, 84, 4))
+    assert outputs.shape == torch.Size([32, 6, 200])
+
+
+@pytest.fixture
+def lstm_cnn():
+    return LSTMModel(output_units=(6, 1), base=NatureCNNBase,
+                     input_shape=(84, 84, 1))
+
+
+def test_lstm_cnn_params(lstm_cnn):
+    assert len(list(lstm_cnn.parameters())) == 12 + 4 + 1
+
+
+def test_lstm_cnn(lstm_cnn):
+    state = lstm_cnn.get_initial_state(3)
+    logits, value, state = lstm_cnn(
+        torch.rand(2, 3, 84, 84, 1), state, torch.zeros(2, 3, dtype=bool)
+    )
+    assert logits.shape == torch.Size([2, 3, 6])
+    assert value.shape == torch.Size([2, 3, 1])
+    assert state.shape == torch.Size([3, 512])
+
+
+def test_lstm_cnn_broadcast(lstm_cnn):
+    state = lstm_cnn.get_initial_state(1)
+    logits, value, state = lstm_cnn(
+        torch.rand(84, 84, 1), state, np.zeros(1, bool)
+    )
+    assert logits.shape == torch.Size([6])
+    assert value.shape == torch.Size([1])
+    assert state.shape == torch.Size([1, 512])
+
+
+@pytest.fixture
+def lstm_mlp():
+    return LSTMModel.make_mlp(observation_dim=17, output_units=(6, 1))
+
+
+def test_lstm_mlp_params(lstm_mlp):
+    assert len(list(lstm_mlp.parameters())) == 2 * 2 + 4 + 1 + 1 + 2 * 2
+
+
+def test_lstm_mlp_broadcast(lstm_mlp):
+    state = lstm_mlp.get_initial_state(1)
+    mean, std, value, state = lstm_mlp(torch.rand(17), state, np.zeros(1, bool))
+    assert mean.shape == torch.Size([6])
+    assert std.shape == torch.Size([6])
+    assert value.shape == torch.Size([1])
+    assert state.shape == torch.Size([1, 512])
+
+
+def test_lstm_mlp_output_shape(lstm_mlp):
+    state = lstm_mlp.get_initial_state(1)
+    mean, std, value, state = lstm_mlp(
+        torch.rand(2, 3, 17), state, torch.zeros(2, 3, dtype=bool))
+    assert mean.shape == torch.Size([2, 3, 6])
+    assert std.shape == torch.Size([2, 3, 6])
+    assert value.shape == torch.Size([2, 3, 1])
+    assert state.shape == torch.Size([3, 512])
 
 
 def test_mujoco_model_params():
-  model = MuJoCoModel(4, 5)
-  model.to("cpu")
-  nweights = nbiases = 0
-  for module in model.modules():
-    if hasattr(module, "bias"):
-      nt.assert_equal(module.bias.detach().numpy(), 0.)
-      nbiases += 1
-    if hasattr(module, "weight"):
-      assert_orthogonal(module.weight.detach().numpy())
-      nweights += 1
-  assert nweights == 3
-  assert nbiases == 3
+    model = MuJoCoModel(4, 5)
+    model.to("cpu")
+    nweights = nbiases = 0
+    for module in model.modules():
+        if hasattr(module, "bias"):
+            nt.assert_equal(module.bias.detach().numpy(), 0.0)
+            nbiases += 1
+        if hasattr(module, "weight"):
+            assert_orthogonal(module.weight.detach().numpy())
+            nweights += 1
+    assert nweights == 3
+    assert nbiases == 3
 
-  # The model should also contain 1 logstd parameter
-  assert len(list(model.parameters())) == 6 + 1
+    # The model should also contain 1 logstd parameter
+    assert len(list(model.parameters())) == 6 + 1
 
 
 def test_mujoco_model_call():
-  model = MuJoCoModel(4, (5, 1))
-  outputs = model(torch.rand(2, 4))
-  assert isinstance(outputs, collections.abc.Iterable)
-  assert len(outputs) == 3
+    model = MuJoCoModel(4, (5, 1))
+    outputs = model(torch.rand(2, 4))
+    assert isinstance(outputs, collections.abc.Iterable)
+    assert len(outputs) == 3
 
-  mean, std, values = outputs
-  assert mean.shape == (2, 5)
-  assert std.shape == (2, 5)
-  nt.assert_equal(std.cpu().detach().numpy(), 1.)
-  assert values.shape == (2, 1)
+    mean, std, values = outputs
+    assert mean.shape == (2, 5)
+    assert std.shape == (2, 5)
+    nt.assert_equal(std.cpu().detach().numpy(), 1.0)
+    assert values.shape == (2, 1)
 
 
 def test_mujoco_model_broadcast():
-  model = MuJoCoModel(3, 5)
-  outputs = model(torch.rand(3))
-  assert isinstance(outputs, collections.abc.Iterable)
-  assert len(outputs) == 2
-  assert outputs[0].shape == (5,)
-  assert outputs[1].shape == (5,)
+    model = MuJoCoModel(3, 5)
+    outputs = model(torch.rand(3))
+    assert isinstance(outputs, collections.abc.Iterable)
+    assert len(outputs) == 2
+    assert outputs[0].shape == (5,)
+    assert outputs[1].shape == (5,)
 
 
 def test_mujoco_model_dtype():
-  model = MuJoCoModel(3, 5)
-  outputs = model(torch.rand(3).double())
-  assert outputs[0].shape == (5,)
-  assert outputs[1].shape == (5,)
+    model = MuJoCoModel(3, 5)
+    outputs = model(torch.rand(3).double())
+    assert outputs[0].shape == (5,)
+    assert outputs[1].shape == (5,)

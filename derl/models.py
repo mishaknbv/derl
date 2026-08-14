@@ -1,449 +1,657 @@
-""" PyTorch models for RL. """
-from functools import partial, wraps
+"""PyTorch models for RL."""
+
 from contextlib import contextmanager
+from functools import partial, wraps
 from itertools import chain, tee
 from math import floor
+
 import gymnasium as gym
 import numpy as np
 import torch
 from torch import nn
+
 from derl.env.env_batch import SpaceBatch
 
 
 class NoisyLinear(nn.Module):
-  """ Noisy linear transformation on top of regular linear layer. """
-  def __init__(self, in_features, out_features,
-               stddev=0.5, factorized=True):
-    super().__init__()
-    self.in_features = in_features
-    self.out_features = out_features
-    self.linear = nn.Linear(in_features, out_features)
-    self.stddev = stddev
-    self.factorized = factorized
-    self.weight = nn.Parameter(
-        torch.Tensor(out_features, in_features))
-    self.bias = nn.Parameter(torch.Tensor(out_features))
-    self.reset_parameters()
+    """Noisy linear transformation on top of regular linear layer."""
 
-  def reset_parameters(self):
-    """ Reinitializes parameters of the layer. """
-    self.linear.reset_parameters()
-    nn.init.kaiming_uniform_(self.weight, a=np.sqrt(5))
-    fan_in = self.weight.shape[1]
-    bound = 1 / np.sqrt(fan_in)
-    nn.init.uniform_(self.bias, -bound, bound)
+    def __init__(self, in_features, out_features, stddev=0.5, factorized=True):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.linear = nn.Linear(in_features, out_features)
+        self.stddev = stddev
+        self.factorized = factorized
+        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
+        self.bias = nn.Parameter(torch.Tensor(out_features))
+        self.reset_parameters()
 
-  def sample_noise(self):
-    """ Samples noise for forward method. """
-    out_features, in_features = self.weight.shape
-    if not self.factorized:
-      weight_noise = torch.normal(0., self.stddev,
-                                  size=(out_features, in_features))
-      bias_noise = torch.normal(0., self.stddev, size=(out_features,))
-      return weight_noise, bias_noise
+    def reset_parameters(self):
+        """Reinitializes parameters of the layer."""
+        self.linear.reset_parameters()
+        nn.init.kaiming_uniform_(self.weight, a=np.sqrt(5))
+        fan_in = self.weight.shape[1]
+        bound = 1 / np.sqrt(fan_in)
+        nn.init.uniform_(self.bias, -bound, bound)
 
-    output_noise = torch.normal(0., self.stddev, size=(out_features,))
-    input_noise = torch.normal(0., self.stddev, size=(in_features,))
-    weight_noise = output_noise[:, None] * input_noise[None]
-    bias_noise = output_noise
-    return weight_noise, bias_noise
+    def sample_noise(self):
+        """Samples noise for forward method."""
+        out_features, in_features = self.weight.shape
+        if not self.factorized:
+            weight_noise = torch.normal(
+                0.0, self.stddev, size=(out_features, in_features)
+            )
+            bias_noise = torch.normal(0.0, self.stddev, size=(out_features,))
+            return weight_noise, bias_noise
 
-  def forward(self, inputs):
-    """ Forward propagates given the inputs. """
-    weight_noise, bias_noise = self.sample_noise()
-    weight_noise = weight_noise.to(self.weight.device)
-    bias_noise = bias_noise.to(self.bias.device)
-    noisy_weight = self.weight * weight_noise
-    noisy_bias = self.bias * bias_noise
-    # pylint: disable=not-callable
-    return (self.linear.forward(inputs)
-            + nn.functional.linear(inputs, noisy_weight, noisy_bias))
-    # pylint: enable=not-callable
+        output_noise = torch.normal(0.0, self.stddev, size=(out_features,))
+        input_noise = torch.normal(0.0, self.stddev, size=(in_features,))
+        weight_noise = output_noise[:, None] * input_noise[None]
+        bias_noise = output_noise
+        return weight_noise, bias_noise
+
+    def forward(self, inputs):
+        """Forward propagates given the inputs."""
+        weight_noise, bias_noise = self.sample_noise()
+        weight_noise = weight_noise.to(self.weight.device)
+        bias_noise = bias_noise.to(self.bias.device)
+        noisy_weight = self.weight * weight_noise
+        noisy_bias = self.bias * bias_noise
+        # pylint: disable=not-callable
+        return self.linear.forward(inputs) + nn.functional.linear(
+            inputs, noisy_weight, noisy_bias
+        )
+        # pylint: enable=not-callable
 
 
 def conv2d_output_shape(height, width, conv2d):
-  """ Computes output shape of given conv2d layer. """
-  padding, stride = conv2d.padding, conv2d.stride
-  dilation, kernel_size = conv2d.dilation, conv2d.kernel_size
-  out_height = floor(
-      (height + 2 * padding[0] - dilation[0] * (kernel_size[0] - 1) - 1)
-      / stride[0] + 1)
-  out_width = floor(
-      (width + 2 * padding[1] - dilation[1] * (kernel_size[1] - 1) - 1)
-      / stride[1] + 1)
-  return out_height, out_width
+    """Computes output shape of given conv2d layer."""
+    padding, stride = conv2d.padding, conv2d.stride
+    dilation, kernel_size = conv2d.dilation, conv2d.kernel_size
+    out_height = floor(
+        (height + 2 * padding[0] - dilation[0] * (kernel_size[0] - 1) - 1) / stride[0]
+        + 1
+    )
+    out_width = floor(
+        (width + 2 * padding[1] - dilation[1] * (kernel_size[1] - 1) - 1) / stride[1]
+        + 1
+    )
+    return out_height, out_width
 
 
 def collocate_inputs(device=True, dtype=True):
-  """ Collocates inputs with model. """
-  def decorator(forward):
-    @wraps(forward)
-    def wrapped(self, *inputs):
-      collocated = []
-      for inpt in inputs:
-        if isinstance(inpt, np.ndarray):
-          inpt = torch.from_numpy(inpt)
-        model_device = next(self.parameters()).device
-        model_dtype = next(self.parameters()).dtype
-        if ((device and inpt.device != model_device)
-            or (dtype and inpt.dtype != model_dtype)):
-          target_device = model_device if device else None
-          target_dtype = model_dtype if dtype else None
-          inpt = inpt.to(device=target_device, dtype=target_dtype)
-        collocated.append(inpt)
-      return forward(self, *collocated)
-    return wrapped
-  return decorator
+    """Collocates inputs with model."""
+
+    def decorator(forward):
+        @wraps(forward)
+        def wrapped(self, *inputs):
+            collocated = []
+            for inpt in inputs:
+                if isinstance(inpt, np.ndarray):
+                    inpt = torch.from_numpy(inpt)
+                model_device = next(self.parameters()).device
+                model_dtype = next(self.parameters()).dtype
+                if (device and inpt.device != model_device) or (
+                    dtype and inpt.dtype != model_dtype
+                ):
+                    target_device = model_device if device else None
+                    target_dtype = model_dtype if dtype else None
+                    inpt = inpt.to(device=target_device, dtype=target_dtype)
+                collocated.append(inpt)
+            return forward(self, *collocated)
+
+        return wrapped
+
+    return decorator
 
 
 def get_device():
-  """ Returns the device for the model / tensors. """
-  if torch.cuda.is_available():
-    device = "cuda"
-  elif torch.backends.mps.is_available():
-    device = "mps"
-  else:
-    device = "cpu"
-  return torch.device(device)
+    """Returns the device for the model / tensors."""
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+    return torch.device(device)
 
 
 class NatureCNNBase(nn.Sequential):
-  """ Hidden layers of the Nature DQN model. """
-  def __init__(self, input_shape=(84, 84, 4), permute=True,
-               output_features=512, activation=nn.ReLU, noisy=False):
-    super().__init__()
-    self.permute = permute
-    in_channels, height, width = input_shape
-    if permute:
-      height, width, in_channels = input_shape
-    convolutions = [
-        nn.Conv2d(in_channels, 32, 8, 4),
-        nn.Conv2d(32, 64, 4, 2),
-        nn.Conv2d(64, 64, 3, 1),
-    ]
-    for i, conv in enumerate(convolutions):
-      height, width = conv2d_output_shape(height, width, conv)
-      self.add_module(f"conv-{i}", conv)
-      self.add_module(f"relu-{i}", activation())
+    """Hidden layers of the Nature DQN model."""
 
-    self.add_module("flatten", nn.Flatten())
-    in_features = height * width * convolutions[-1].out_channels
-    linear_class = NoisyLinear if noisy else nn.Linear
-    self.add_module("linear", linear_class(in_features, output_features))
+    def __init__(
+        self,
+        input_shape=(84, 84, 4),
+        permute=True,
+        output_features=512,
+        activation=nn.ReLU,
+        noisy=False,
+    ):
+        super().__init__()
+        self.permute = permute
+        in_channels, height, width = input_shape
+        if permute:
+            height, width, in_channels = input_shape
+        convolutions = [
+            nn.Conv2d(in_channels, 32, 8, 4),
+            nn.Conv2d(32, 64, 4, 2),
+            nn.Conv2d(64, 64, 3, 1),
+        ]
+        for i, conv in enumerate(convolutions):
+            height, width = conv2d_output_shape(height, width, conv)
+            self.add_module(f"conv-{i}", conv)
+            self.add_module(f"relu-{i}", activation())
 
-  @collocate_inputs(dtype=False)
-  def forward(self, inputs):  # pylint: disable=arguments-renamed
-    if self.permute:
-      inputs = inputs.permute(0, 3, 1, 2)
-    if inputs.dtype == torch.uint8:
-      inputs = inputs.float() / 255
-    inputs = inputs.contiguous()
-    return super().forward(inputs)
+        self.add_module("flatten", nn.Flatten())
+        in_features = height * width * convolutions[-1].out_channels
+        linear_class = NoisyLinear if noisy else nn.Linear
+        self.add_module("linear", linear_class(in_features, output_features))
+
+    @collocate_inputs(dtype=False)
+    def forward(self, inputs):  # pylint: disable=arguments-renamed
+        if self.permute:
+            inputs = inputs.permute(0, 3, 1, 2)
+        if inputs.dtype == torch.uint8:
+            inputs = inputs.float() / 255
+        inputs = inputs.contiguous()
+        return super().forward(inputs)
 
 
 def init_weights(layer, weight_initializer, bias_initializer):
-  """ Initializers weights and biases of a given layer. """
-  if hasattr(layer, "weight"):
-    weight_initializer(layer.weight)
-  if hasattr(layer, "bias"):
-    bias_initializer(layer.bias)
+    """Initializers weights and biases of a given layer."""
+    if hasattr(layer, "weight"):
+        weight_initializer(layer.weight)
+    if hasattr(layer, "weight_ih"):
+        weight_initializer(layer.weight_ih)
+    if hasattr(layer, "weight_hh"):
+        weight_initializer(layer.weight_hh)
+    if hasattr(layer, "bias") and not isinstance(layer.bias, bool):
+        bias_initializer(layer.bias)
+    if hasattr(layer, "bias_ih"):
+        bias_initializer(layer.bias_ih)
+    if hasattr(layer, "bias_hh"):
+        bias_initializer(layer.bias_hh)
 
 
 def orthogonal_init(layer):
-  """ Orthogonal initialization of layers and zero initialization of biases. """
-  init_weights(layer, weight_initializer=nn.init.orthogonal_,
-               bias_initializer=nn.init.zeros_)
+    """Orthogonal initialization of layers and zero initialization of biases."""
+    init_weights(
+        layer, weight_initializer=nn.init.orthogonal_, bias_initializer=nn.init.zeros_
+    )
+
+
+def broadcast(ndims, *tensors):
+    """ Broadcasts tensors to dimensionality. """
+    input_ndim = tensors[0].ndim
+    for i, tnsr in enumerate(tensors):
+        if tnsr.ndim != input_ndim:
+            raise ValueError(
+                "for broadcasting all inputs must have the same "
+                "number of dimensions, got "
+                f"tensors[0].shape={tensors[0].shape}, "
+                f"tensors[{i}].shape={tnsr.shape}"
+            )
+    expand_dims = ndims - input_ndim
+    tensors = tuple(tnsr[(None,) * expand_dims] for tnsr in tensors)
+    return expand_dims, *tensors
+
+
+def unbroadcast(ndims, output):
+    """ Squeezes tensors along the first ndims. """
+    if isinstance(output, (tuple, list)):
+        return type(output)(unbroadcast(ndims, out) for out in output)
+    return torch.reshape(output, output.shape[ndims:])
 
 
 def broadcast_inputs(ndims):
-  """ Broadcast inputs to specified number of dims and then back. """
-  def decorator(forward):
-    @wraps(forward)
-    def wrapped(self, *inputs):
-      input_ndim = inputs[0].ndim
-      for i, inpt in enumerate(inputs):
-        if inpt.ndim != input_ndim:
-          raise ValueError("for broadcasting all inputs must have the same "
-                           "number of dimensions, got "
-                           f"inputs[0].shape={inputs[0].shape}, "
-                           f"inputs[{i}].shape={inputs[i].shape}")
-      expand_dims = ndims - input_ndim
-      inputs = tuple(inpt[(None,) * expand_dims] for inpt in inputs)
-      outputs = forward(self, *inputs)
+    """Broadcast inputs to specified number of dims and then back."""
 
-      def unbroadcast(output):
-        if isinstance(output, (tuple, list)):
-          return type(output)(unbroadcast(out) for out in output)
-        return torch.reshape(output, output.shape[expand_dims:])
-      return unbroadcast(outputs)
-    return wrapped
-  return decorator
+    def decorator(forward):
+        @wraps(forward)
+        def wrapped(self, *inputs):
+            expand_dims, *inputs = broadcast(ndims, *inputs)
+            outputs = forward(self, *inputs)
+            return unbroadcast(expand_dims, outputs)
+
+        return wrapped
+
+    return decorator
 
 
 class NatureCNNModel(nn.Module):
-  """ Nature DQN model that supports subsequently proposed modifications. """
-  def __init__(self,
-               output_units,
-               input_shape=(84, 84, 4),
-               noisy=False,
-               dueling=False,
-               num_quantiles=None,
-               init_fn=orthogonal_init):
-    super().__init__()
-    self.dueling = dueling
-    self.num_quantiles = num_quantiles
-    self.single_output = not isinstance(output_units, (list, tuple))
-    self.output_units = ([output_units] if self.single_output
-                         else list(output_units))
+    """Nature DQN model that supports subsequently proposed modifications."""
 
-    if num_quantiles is not None:
-      self.output_units[0] *= num_quantiles
-    if dueling:
-      self.output_units.append(num_quantiles or 1)
+    def __init__(
+        self,
+        output_units,
+        input_shape=(84, 84, 4),
+        noisy=False,
+        dueling=False,
+        num_quantiles=None,
+        init_fn=orthogonal_init,
+    ):
+        super().__init__()
+        self.dueling = dueling
+        self.num_quantiles = num_quantiles
+        self.single_output = not isinstance(output_units, (list, tuple))
+        self.output_units = [output_units] if self.single_output else list(output_units)
 
-    self.base = NatureCNNBase(input_shape, noisy=noisy)
-    in_units = list(self.base.children())[-1].out_features
-    linear_class = NoisyLinear if noisy else nn.Linear
-    self.output_layers = nn.ModuleList(
-        [linear_class(in_units, out_units)
-         for out_units in self.output_units])
-    self.init_fn = init_fn
-    if self.init_fn:
-      self.apply(self.init_fn)
-    self.to(get_device())
+        if num_quantiles is not None:
+            self.output_units[0] *= num_quantiles
+        if dueling:
+            self.output_units.append(num_quantiles or 1)
 
-  @broadcast_inputs(ndims=4)
-  def forward(self, *inputs):
-    """ Forward propagates given the inputs. """
-    observations, = inputs
-    base_outputs = self.base(observations)
-    outputs = [layer(base_outputs) for layer in self.output_layers]
-    if self.num_quantiles is not None:
-      nactions = self.output_units[0] // self.num_quantiles
-      outputs[0] = torch.reshape(outputs[0], (-1, nactions, self.num_quantiles))
-    if self.dueling:
-      advantages, values = outputs
-      values = torch.reshape(
-          values, (-1, 1, self.num_quantiles) if self.num_quantiles is not None else (-1, 1))
-      outputs = [(values + advantages
-                  - torch.mean(advantages, 1, keepdims=True))]
-    if self.single_output:
-      outputs = outputs[0]
-    return outputs
+        self.base = NatureCNNBase(input_shape, noisy=noisy)
+        in_units = list(self.base.children())[-1].out_features
+        linear_class = NoisyLinear if noisy else nn.Linear
+        self.output_layers = nn.ModuleList(
+            [linear_class(in_units, out_units) for out_units in self.output_units]
+        )
+        self.init_fn = init_fn
+        if self.init_fn:
+            self.apply(self.init_fn)
+        self.to(get_device())
+
+    @broadcast_inputs(ndims=4)
+    def forward(self, *inputs):
+        """Forward propagates given the inputs."""
+        (observations,) = inputs
+        base_outputs = self.base(observations)
+        outputs = [layer(base_outputs) for layer in self.output_layers]
+        if self.num_quantiles is not None:
+            nactions = self.output_units[0] // self.num_quantiles
+            outputs[0] = torch.reshape(outputs[0], (-1, nactions, self.num_quantiles))
+        if self.dueling:
+            advantages, values = outputs
+            values = torch.reshape(
+                values,
+                (-1, 1, self.num_quantiles)
+                if self.num_quantiles is not None
+                else (-1, 1),
+            )
+            outputs = [(values + advantages - torch.mean(advantages, 1, keepdims=True))]
+        if self.single_output:
+            outputs = outputs[0]
+        return outputs
+
+
+class LSTMModel(nn.Module):
+    """ Model with LSTM.
+
+    Observations are expected to have shape
+    `(time, batch) + observation_shape`, the recurrent state has shape
+    `(batch,) + state_shape` (concatenated cell and hidden LSTM states), and
+    the resets (done flags) have shape `(time, batch)`.
+    """
+
+    def __init__(
+        self,
+        base,
+        output_units,
+        hidden_size=256,
+        logstd=False,
+        init_fn=orthogonal_init,
+        activation=nn.ReLU,
+        **base_kwargs,
+    ):
+        super().__init__()
+        self.base = base(activation=activation, **base_kwargs)
+        if not isinstance(output_units, (tuple, list)):
+            output_units = [output_units]
+        self.output_units = list(output_units)
+        in_units = list(self.base.children())[-1].out_features
+        self.lstm_cell = nn.modules.rnn.LSTMCell(in_units, hidden_size)
+        self.activation = activation()
+        self.output_layers = nn.ModuleList(
+            nn.Linear(hidden_size, out_units) for out_units in self.output_units
+        )
+        self.initial_state = nn.Parameter(torch.zeros(2 * hidden_size))
+        self.init_fn = init_fn
+        if self.init_fn:
+            self.apply(self.init_fn)
+        self.logstd = nn.Parameter(torch.zeros(output_units[0])) if logstd else None
+        self.to(get_device())
+
+    @classmethod
+    def make_cnn(cls, input_shape, output_units, **kwargs):
+        """ Creates LSTM model with NatureCNNBase as base. """
+        return cls(base=NatureCNNBase, input_shape=input_shape,
+                   output_units=output_units, **kwargs)
+
+    @classmethod
+    def make_mlp(cls, observation_dim, output_units, logstd=True,
+                 hidden_features=(64,), **kwargs):
+        """ Creates LSTM model with MLP base. """
+        mlp = partial(MLP, out_features=hidden_features[-1],
+                      hidden_features=hidden_features)
+        return cls(in_features=observation_dim, base=mlp,
+                   output_units=output_units, logstd=logstd, **kwargs)
+
+    @property
+    def hidden_size(self):
+        """Hidden size of the lstm."""
+        return self.lstm_cell.hidden_size
+
+    def get_initial_state(self, batch_size):
+        """Returns the initial state of the RNN."""
+        return torch.repeat_interleave(self.initial_state[None], batch_size, 0)
+
+    def lstm_for_loop(self, features, state, resets):
+        """For loop of LSTM."""
+        time, batch_size, _ = features.shape
+        hx, cx = torch.split(state, self.hidden_size, 1)
+        h0, c0 = torch.split(self.get_initial_state(batch_size), self.hidden_size, 1)
+        outputs = []
+        for t in range(time):
+            hx = hx * ~resets[t, ..., None] + resets[t, ..., None] * h0
+            cx = cx * ~resets[t, ..., None] + resets[t, ..., None] * c0
+            hx, cx = self.lstm_cell(features[t], (hx, cx))
+            outputs.append(hx)
+        new_states = torch.cat([outputs[-1], cx], 1)
+        return torch.stack(outputs, 0), new_states
+
+    @collocate_inputs(device=False, dtype=False)
+    def forward(self, observations, states, resets):
+        """Forward propagates given the observations, recurrent states and resets."""
+        if observations.dtype == torch.float64:
+            observations = observations.to(torch.float32)
+        observations, states, resets = (
+            t.to(next(self.parameters()).device) for t in (observations, states, resets)
+        )
+        expand_dims = 5 if any(isinstance(m, nn.Conv2d) for m in self.modules()) else 3
+        expand_dims, observations = broadcast(expand_dims, observations)
+        time, batch_size = observations.shape[:2]
+        features = self.activation(self.base(
+            torch.reshape(observations, (-1,) + observations.shape[2:])
+        ))
+        features = torch.reshape(features, (time, batch_size, -1))
+        hidden, new_states  = self.lstm_for_loop(features, states, resets)
+        flat = torch.reshape(hidden, (-1, self.hidden_size))
+        outputs = [
+            torch.reshape(layer(flat), hidden.shape[:2] + (-1,))
+            for layer in self.output_layers
+        ]
+        mean, *other = unbroadcast(expand_dims, outputs)
+        if self.logstd is None:
+            return mean, *other, new_states
+        std = torch.exp(self.logstd)[None, None]
+        std = torch.repeat_interleave(std, batch_size, 1)
+        std = torch.repeat_interleave(std, time, 0)
+        std = unbroadcast(expand_dims, std)
+        return mean, std, *other, new_states
 
 
 def pairwise(iterable):
-  """ s -> (s0,s1), (s1,s2), (s2, s3), ... """
-  it1, it2 = tee(iterable)
-  next(it2, None)
-  return zip(it1, it2)
+    """s -> (s0,s1), (s1,s2), (s2, s3), ..."""
+    it1, it2 = tee(iterable)
+    next(it2, None)
+    return zip(it1, it2)
 
 
 class MLP(nn.Sequential):
-  """ Multi-layer perceptron. """
-  def __init__(self,
-               in_features,
-               out_features,
-               hidden_features=(64, 64),
-               activation=nn.Tanh):
-    layers = list(chain.from_iterable(
-        (nn.Linear(nin, nout), activation())
-        for nin, nout in pairwise(chain(
-            (in_features,), hidden_features, (out_features,)))
-    ))
-    layers.pop()  # Remove redundant activation after last layer.
-    super().__init__(*layers)
+    """Multi-layer perceptron."""
+
+    def __init__(
+        self, in_features, out_features, hidden_features=(64, 64), activation=nn.Tanh
+    ):
+        layers = list(
+            chain.from_iterable(
+                (nn.Linear(nin, nout), activation())
+                for nin, nout in pairwise(
+                    chain((in_features,), hidden_features, (out_features,))
+                )
+            )
+        )
+        layers.pop()  # Remove redundant activation after last layer.
+        super().__init__(*layers)
 
 
 class MuJoCoModel(nn.Module):
-  """ MuJoCo model. """
-  def __init__(self, observation_dim, output_units, mlp=MLP,
-               logstd=True, logstd_from_mlp=None,
-               init_fn=orthogonal_init,
-               logstd_clamp=(-20, 2)):
-    super().__init__()
-    if not isinstance(output_units, (tuple, list)):
-      output_units = [output_units]
-    self.module_list = nn.ModuleList()
-    for nunits in output_units:
-      self.module_list.append(mlp(observation_dim, nunits))
-    self.init_fn = init_fn
-    if self.init_fn is not None:
-      self.apply(self.init_fn)
-    self.base = (
-        self.module_list[0].base
-        if hasattr(self.module_list[0], "base") # sacmlp
-        else nn.Sequential(*[   # mlp
-            l for i, l in enumerate(self.module_list[0])
-            if i < len(self.module_list) - 1
-        ])
-    )
-    self.logstd_clamp = logstd_clamp
-    self.logstd_from_mlp = logstd and logstd_from_mlp
-    if self.logstd_from_mlp is None:
-      outputs = self.module_list[0](torch.empty(observation_dim))
-      self.logstd_from_mlp = (isinstance(outputs, (list, tuple))
-                              and len(outputs) == 2)
-    self.logstd = (nn.Parameter(torch.zeros(output_units[0]))
-                   if logstd and not self.logstd_from_mlp else None)
-    self.to(get_device())
+    """MuJoCo model."""
 
-  @broadcast_inputs(ndims=2)
-  @collocate_inputs()
-  def forward(self, *inputs):
-    """ Forward propagates given the inputs. """
-    observations, = inputs
-    first, *other = (module(observations) for module in self.module_list)
-    if self.logstd_from_mlp:
-      logits, logstd = first
-      logstd = torch.clamp(logstd, *self.logstd_clamp)
-      return (logits, torch.exp(logstd), *other)
-    batch_size = observations.shape[0]
-    if self.logstd is None:
-      return (first, *other)
-    std = torch.repeat_interleave(torch.exp(self.logstd)[None], batch_size, 0)
-    return (first, std, *other)
+    def __init__(
+        self,
+        observation_dim,
+        output_units,
+        mlp=MLP,
+        logstd=True,
+        logstd_from_mlp=None,
+        init_fn=orthogonal_init,
+        logstd_clamp=(-20, 2),
+    ):
+        super().__init__()
+        if not isinstance(output_units, (tuple, list)):
+            output_units = [output_units]
+        self.module_list = nn.ModuleList()
+        for nunits in output_units:
+            self.module_list.append(mlp(observation_dim, nunits))
+        self.init_fn = init_fn
+        if self.init_fn is not None:
+            self.apply(self.init_fn)
+        self.base = (
+            self.module_list[0].base
+            if hasattr(self.module_list[0], "base")  # sacmlp
+            else nn.Sequential(
+                *[  # mlp
+                    l
+                    for i, l in enumerate(self.module_list[0])
+                    if i < len(self.module_list) - 1
+                ]
+            )
+        )
+        self.logstd_clamp = logstd_clamp
+        self.logstd_from_mlp = logstd and logstd_from_mlp
+        if self.logstd_from_mlp is None:
+            outputs = self.module_list[0](torch.empty(observation_dim))
+            self.logstd_from_mlp = (
+                isinstance(outputs, (list, tuple)) and len(outputs) == 2
+            )
+        self.logstd = (
+            nn.Parameter(torch.zeros(output_units[0]))
+            if logstd and not self.logstd_from_mlp
+            else None
+        )
+        self.to(get_device())
+
+    @broadcast_inputs(ndims=2)
+    @collocate_inputs()
+    def forward(self, *inputs):
+        """Forward propagates given the inputs."""
+        (observations,) = inputs
+        first, *other = (module(observations) for module in self.module_list)
+        if self.logstd_from_mlp:
+            logits, logstd = first
+            logstd = torch.clamp(logstd, *self.logstd_clamp)
+            return (logits, torch.exp(logstd), *other)
+        batch_size = observations.shape[0]
+        if self.logstd is None:
+            return (first, *other)
+        std = torch.repeat_interleave(torch.exp(self.logstd)[None], batch_size, 0)
+        return (first, std, *other)
 
 
 def vector_size(shape):
-  """ Checks whether the given shape is 1-dim and returns its size. """
-  if len(shape) != 1:
-    raise ValueError(f"expected vector shape, got shape={shape}")
-  return shape[0]
+    """Checks whether the given shape is 1-dim and returns its size."""
+    if len(shape) != 1:
+        raise ValueError(f"expected vector shape, got shape={shape}")
+    return shape[0]
 
 
-def make_model(observation_space, action_space, other_outputs=None, **kwargs):
-  """ Creates default model for given observation and action spaces. """
-  if isinstance(other_outputs, int) or other_outputs is None:
-    other_outputs = [other_outputs] if other_outputs is not None else []
+def make_model(observation_space, action_space, other_outputs=None,
+               recurrent=False, **kwargs):
+    """Creates default model for given observation and action spaces."""
+    if isinstance(other_outputs, int) or other_outputs is None:
+        other_outputs = [other_outputs] if other_outputs is not None else []
 
-  if isinstance(observation_space, SpaceBatch):
-    observation_space = observation_space.spaces[0]
-  if isinstance(action_space, SpaceBatch):
-    action_space = action_space.spaces[0]
+    if isinstance(observation_space, SpaceBatch):
+        observation_space = observation_space.spaces[0]
+    if isinstance(action_space, SpaceBatch):
+        action_space = action_space.spaces[0]
 
-  if (isinstance(observation_space, gym.spaces.Box)
-      and len(observation_space.shape) == 3):
-    output_units = [action_space.n, *other_outputs]
-    return NatureCNNModel(input_shape=observation_space.shape,
-                          output_units=output_units, **kwargs)
-  observation_dim = vector_size(observation_space.shape)
-  action_dim = (vector_size(action_space.shape)
-                if isinstance(action_space, gym.spaces.Box)
-                else action_space.n)
-  output_units = [action_dim, *other_outputs]
-  return MuJoCoModel(observation_dim=observation_dim,
-                     output_units=output_units,
-                     logstd=isinstance(action_space, gym.spaces.Box),
-                     **kwargs)
+    if (
+        isinstance(observation_space, gym.spaces.Box)
+        and len(observation_space.shape) == 3
+    ):
+        output_units = [action_space.n, *other_outputs]
+        if recurrent:
+            return LSTMModel.make_cnn(
+                input_shape=observation_space.shape, output_units=output_units, **kwargs
+            )
+        return NatureCNNModel(
+            input_shape=observation_space.shape, output_units=output_units, **kwargs
+        )
+    observation_dim = vector_size(observation_space.shape)
+    action_dim = (
+        vector_size(action_space.shape)
+        if isinstance(action_space, gym.spaces.Box)
+        else action_space.n
+    )
+    output_units = [action_dim, *other_outputs]
+    if recurrent:
+        return LSTMModel.make_mlp(observation_dim=observation_dim,
+                                  output_units=output_units, **kwargs)
+    return MuJoCoModel(
+        observation_dim=observation_dim,
+        output_units=output_units,
+        logstd=isinstance(action_space, gym.spaces.Box),
+        **kwargs,
+    )
 
 
 class SACMLP(nn.Module):
-  """ MLP for use with SAC model. """
-  def __init__(self, in_features, out_features, nheads=2,
-               hidden_features=(256, 256), activation=nn.ReLU):
-    super().__init__()
-    self.base = MLP(in_features=in_features,
-                    out_features=hidden_features[-1],
-                    hidden_features=hidden_features[:-1],
-                    activation=activation)
-    if nheads is not None and nheads < 1:
-      raise ValueError("nheads must be either None or at least 1, "
-                       f"got nheads={nheads}")
-    self.nheads = nheads
-    self.activation = activation()
-    self.heads = nn.ModuleList(nn.Linear(hidden_features[-1], out_features)
-                               for _ in range(nheads or 1))
+    """MLP for use with SAC model."""
 
-  def forward(self, *inputs):
-    """ Forward propagates given the inputs. """
-    hidden = self.activation(self.base.forward(*inputs))
-    return [head(hidden) for head in self.heads][
-        slice(None) if self.nheads is not None else 0]
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        nheads=2,
+        hidden_features=(256, 256),
+        activation=nn.ReLU,
+    ):
+        super().__init__()
+        self.base = MLP(
+            in_features=in_features,
+            out_features=hidden_features[-1],
+            hidden_features=hidden_features[:-1],
+            activation=activation,
+        )
+        if nheads is not None and nheads < 1:
+            raise ValueError(
+                f"nheads must be either None or at least 1, got nheads={nheads}"
+            )
+        self.nheads = nheads
+        self.activation = activation()
+        self.heads = nn.ModuleList(
+            nn.Linear(hidden_features[-1], out_features) for _ in range(nheads or 1)
+        )
+
+    def forward(self, *inputs):
+        """Forward propagates given the inputs."""
+        hidden = self.activation(self.base.forward(*inputs))
+        return [head(hidden) for head in self.heads][
+            slice(None) if self.nheads is not None else 0
+        ]
 
 
 class ContinuousQValueModel(nn.Module):
-  """ Continuous Q-value model. """
-  def __init__(self, observation_dim, action_dim,
-               mlp=partial(SACMLP, nheads=None), init_fn=orthogonal_init):
-    super().__init__()
-    self.observation_dim = observation_dim
-    self.action_dim = action_dim
-    self.mlp = mlp(observation_dim + action_dim, 1)
-    self.init_fn = init_fn
-    if self.init_fn is not None:
-      self.apply(self.init_fn)
-    self.to(get_device())
+    """Continuous Q-value model."""
 
-  @broadcast_inputs(ndims=2)
-  @collocate_inputs()
-  def forward(self, *inputs):
-    """ Forward propagates given the inputs. """
-    observations, actions = inputs
-    cat = torch.cat([observations, actions], -1)
-    return self.mlp(cat)
+    def __init__(self, observation_dim, action_dim, mlp=None, init_fn=orthogonal_init):
+        super().__init__()
+        self.observation_dim = observation_dim
+        self.action_dim = action_dim
+        if mlp is None:
+            mlp = partial(SACMLP, nheads=None)
+        self.mlp = mlp(observation_dim + action_dim, 1)
+        self.init_fn = init_fn
+        if self.init_fn is not None:
+            self.apply(self.init_fn)
+        self.to(get_device())
+
+    @broadcast_inputs(ndims=2)
+    @collocate_inputs()
+    def forward(self, *inputs):
+        """Forward propagates given the inputs."""
+        observations, actions = inputs
+        cat = torch.cat([observations, actions], -1)
+        return self.mlp(cat)
 
 
 class SACModel(nn.Module):
-  """ Combines policy and Q-values modules as used by SAC algorithm. """
-  def __init__(self, policy, qvalues):
-    super().__init__()
-    self.policy = policy
-    if isinstance(qvalues, (list, tuple, np.ndarray)):
-      qvalues = nn.ModuleList(qvalues)
-    self.qvalues = qvalues
-    self.active_module = self.policy
+    """Combines policy and Q-values modules as used by SAC algorithm."""
 
-  @classmethod
-  def make(cls, observation_space, action_space, num_qvalue_functions=2,
-           policy_mlp=SACMLP, qvalues_mlp=partial(SACMLP, nheads=None),
-           init_fn=orthogonal_init):
-    """ Creates SACModel. """
-    observation_dim = vector_size(observation_space.shape)
-    action_dim = vector_size(action_space.shape)
-    policy = MuJoCoModel(observation_dim, action_dim,
-                         mlp=policy_mlp, init_fn=init_fn)
-    qvalues = [
-        ContinuousQValueModel(observation_dim, action_dim, mlp=qvalues_mlp,
-                              init_fn=orthogonal_init)
-        for _ in range(num_qvalue_functions)
-    ]
-    return cls(policy, qvalues)
+    def __init__(self, policy, qvalues):
+        super().__init__()
+        self.policy = policy
+        if isinstance(qvalues, (list, tuple, np.ndarray)):
+            qvalues = nn.ModuleList(qvalues)
+        self.qvalues = qvalues
+        self.active_module = self.policy
 
-  def qvalues_parameters(self):
-    """ Iterator over parameters of the q-values module list. """
-    yield from chain.from_iterable(map(nn.Module.parameters, self.qvalues))
+    @classmethod
+    def make(
+        cls,
+        observation_space,
+        action_space,
+        num_qvalue_functions=2,
+        policy_mlp=SACMLP,
+        qvalues_mlp=None,
+        init_fn=orthogonal_init,
+    ):
+        """Creates SACModel."""
+        observation_dim = vector_size(observation_space.shape)
+        action_dim = vector_size(action_space.shape)
+        if qvalues_mlp is None:
+            qvalues_mlp = partial(SACMLP, nheads=None)
+        policy = MuJoCoModel(
+            observation_dim, action_dim, mlp=policy_mlp, init_fn=init_fn
+        )
+        qvalues = [
+            ContinuousQValueModel(
+                observation_dim, action_dim, mlp=qvalues_mlp, init_fn=orthogonal_init
+            )
+            for _ in range(num_qvalue_functions)
+        ]
+        return cls(policy, qvalues)
 
-  def policy_mode(self):
-    """ Activates policy module of the model. """
-    self.active_module = self.policy
+    def qvalues_parameters(self):
+        """Iterator over parameters of the q-values module list."""
+        yield from chain.from_iterable(map(nn.Module.parameters, self.qvalues))
 
-  @contextmanager
-  def policy_context(self):
-    """ Policy mode context manager. """
-    module = self.active_module
-    self.policy_mode()
-    try:
-      yield
-    finally:
-      self.active_module = module
+    def policy_mode(self):
+        """Activates policy module of the model."""
+        self.active_module = self.policy
 
-  def qvalues_mode(self):
-    """ Activates qvalues module of the model. """
-    self.active_module = self.qvalues
+    @contextmanager
+    def policy_context(self):
+        """Policy mode context manager."""
+        module = self.active_module
+        self.policy_mode()
+        try:
+            yield
+        finally:
+            self.active_module = module
 
-  @contextmanager
-  def qvalues_context(self):
-    """ Q-values mode context manager. """
-    module = self.active_module
-    self.qvalues_mode()
-    try:
-      yield
-    finally:
-      self.active_module = module
+    def qvalues_mode(self):
+        """Activates qvalues module of the model."""
+        self.active_module = self.qvalues
 
-  def forward(self, *inputs):
-    """ Forward propagates given the inputs. """
-    return ([module(*inputs) for module in self.active_module]
+    @contextmanager
+    def qvalues_context(self):
+        """Q-values mode context manager."""
+        module = self.active_module
+        self.qvalues_mode()
+        try:
+            yield
+        finally:
+            self.active_module = module
+
+    def forward(self, *inputs):
+        """Forward propagates given the inputs."""
+        return (
+            [module(*inputs) for module in self.active_module]
             if isinstance(self.active_module, nn.ModuleList)
-            else self.active_module(*inputs))
+            else self.active_module(*inputs)
+        )

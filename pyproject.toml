@@ -24,6 +24,7 @@ packages = ["derl"]
 dev = [
     "pylint>=4.0.6",
     "pytest>=8.0.0",
+    "ruff>=0.16.2",
 ]
 
 mujoco = [
@@ -42,3 +43,7 @@ derl = "derl.scripts.derl:main"
 testpaths = ["derl"]
 norecursedirs = [".git", ".venv", "build", "logdir", "tmp", "runs", "testdata"]
 
+[tool.ruff.lint]
+ignore = [
+    "C408", # dict literal
+]

@@ -1,117 +1,132 @@
-""" Trajectory transformations. """
+"""Trajectory transformations."""
+
 import numpy as np
 
 
-def compute_gae(rewards, terminations, values, last_value,
-                gamma=0.99, lambda_=0.95):
-  """ Computes GAE. """
-  target_dim = values.ndim
-  if values.ndim == rewards.ndim + 1:
-    values = values.squeeze(-1)
-  gae = np.zeros_like(values, dtype=np.float32)
-  gae[-1] = rewards[-1] - values[-1]
-  if np.asarray(terminations[-1]).ndim < last_value.ndim:
-    last_value = np.squeeze(last_value, -1)
-  gae[-1] += (1 - terminations[-1]) * gamma * last_value
+def compute_gae(rewards, terminations, values, last_value, gamma=0.99, lambda_=0.95):
+    """Computes GAE."""
+    target_dim = values.ndim
+    if values.ndim == rewards.ndim + 1:
+        values = values.squeeze(-1)
+    gae = np.zeros_like(values, dtype=np.float32)
+    gae[-1] = rewards[-1] - values[-1]
+    if np.asarray(terminations[-1]).ndim < last_value.ndim:
+        last_value = np.squeeze(last_value, -1)
+    gae[-1] += (1 - terminations[-1]) * gamma * last_value
 
-  for i in range(gae.shape[0] - 1, 0, -1):
-    not_reset = 1 - terminations[i - 1]
-    next_values = values[i]
-    delta = (rewards[i - 1]
-             + not_reset * gamma * next_values
-             - values[i - 1])
-    gae[i - 1] = delta + not_reset * gamma * lambda_ * gae[i]
-  value_targets = gae + values
-  value_targets = value_targets[
-      (...,) + (None,) * (target_dim - value_targets.ndim)]
-  return gae, value_targets
-
-
-class GAE:
-  """ Generalized Advantage Estimator.
-
-  See [Schulman et al., 2016](https://arxiv.org/abs/1506.02438)
-  """
-  def __init__(self, policy, gamma=0.99, lambda_=0.95, normalize=None,
-               epsilon=1e-8):
-    self.policy = policy
-    self.gamma = gamma
-    self.lambda_ = lambda_
-    self.normalize = normalize
-    self.epsilon = epsilon
-
-  def __call__(self, trajectory):
-    """ Applies the advantage estimator to a given trajectory.
-
-    Returns:
-      a tuple of (advantages, value_targets).
-    """
-    if "advantages" in trajectory:
-      raise ValueError("trajectory cannot contain 'advantages'")
-    if "value_targets" in trajectory:
-      raise ValueError("trajectory cannot contain 'value_targets'")
-
-    rewards = trajectory["rewards"]
-    terminations = trajectory["terminations"]
-    values = trajectory["values"]
-
-    # Values might have an additional last dimension of size 1 as outputs of
-    # dense layers. Need to adjust shapes of rewards and terminations accordingly.
-    if (not (0 <= values.ndim - rewards.ndim <= 1)
-        or values.ndim == rewards.ndim + 1 and values.shape[-1] != 1):
-      raise ValueError(
-          f"trajectory['values'] of shape {trajectory['values'].shape} "
-          "must have the same number of dimensions as "
-          f"trajectory['rewards'] which has shape {rewards.shape} "
-          "or have last dimension of size 1")
-
-    observation = trajectory["state"]["latest_observations"]
-    state = trajectory["state"].get("policy_state", None)
-    last_value = self.policy.act(observation, state=state,
-                                 update_state=False)["values"]
-
-    gae, value_targets = compute_gae(rewards, terminations, values, last_value,
-                                     gamma=self.gamma, lambda_=self.lambda_)
-
-    if self.normalize or self.normalize is None and gae.size > 1:
-      gae = (gae - gae.mean()) / (gae.std() + self.epsilon)
-
-    trajectory["advantages"] = gae
-    trajectory["value_targets"] = value_targets
+    for i in range(gae.shape[0] - 1, 0, -1):
+        not_reset = 1 - terminations[i - 1]
+        next_values = values[i]
+        delta = rewards[i - 1] + not_reset * gamma * next_values - values[i - 1]
+        gae[i - 1] = delta + not_reset * gamma * lambda_ * gae[i]
+    value_targets = gae + values
+    value_targets = value_targets[(...,) + (None,) * (target_dim - value_targets.ndim)]
     return gae, value_targets
 
 
-class MergeTimeBatch:
-  """ Merges first two axes typically representing time and env batch. """
-  def __init__(self, check_shape=True):
-    self.check_shape = check_shape
+class GAE:
+    """Generalized Advantage Estimator.
 
-  def __call__(self, trajectory):
-    if self.check_shape:
-      assert trajectory["terminations"].ndim == 2,\
-        trajectory["terminations"].shape
-    for key, val in filter(lambda kv: isinstance(kv[1], np.ndarray),
-                           trajectory.items()):
-      trajectory[key] = np.reshape(val, (-1, *val.shape[2:]))
+    See [Schulman et al., 2016](https://arxiv.org/abs/1506.02438)
+    """
+
+    def __init__(self, policy, gamma=0.99, lambda_=0.95, normalize=None, epsilon=1e-8):
+        self.policy = policy
+        self.gamma = gamma
+        self.lambda_ = lambda_
+        self.normalize = normalize
+        self.epsilon = epsilon
+
+    def __call__(self, trajectory):
+        """Applies the advantage estimator to a given trajectory.
+
+        Returns:
+          a tuple of (advantages, value_targets).
+        """
+        if "advantages" in trajectory:
+            raise ValueError("trajectory cannot contain 'advantages'")
+        if "value_targets" in trajectory:
+            raise ValueError("trajectory cannot contain 'value_targets'")
+
+        rewards = trajectory["rewards"]
+        terminations = trajectory["terminations"]
+        resets = trajectory["terminations"] | trajectory["truncations"]
+        values = trajectory["values"]
+
+        # Values might have an additional last dimension of size 1 as outputs of
+        # dense layers. Need to adjust shapes of rewards and terminations accordingly.
+        if (
+            not (0 <= values.ndim - rewards.ndim <= 1)
+            or values.ndim == rewards.ndim + 1
+            and values.shape[-1] != 1
+        ):
+            raise ValueError(
+                f"trajectory['values'] of shape {trajectory['values'].shape} "
+                "must have the same number of dimensions as "
+                f"trajectory['rewards'] which has shape {rewards.shape} "
+                "or have last dimension of size 1"
+            )
+
+        observation = trajectory["state"]["latest_observations"]
+        state = trajectory.get("policy_state", [None])[-1]
+        last_value = self.policy.act(observation, state=state, resets=resets[-1:])[
+            "values"
+        ]
+
+        gae, value_targets = compute_gae(
+            rewards,
+            terminations,
+            values,
+            last_value,
+            gamma=self.gamma,
+            lambda_=self.lambda_,
+        )
+
+        if self.normalize or self.normalize is None and gae.size > 1:
+            gae = (gae - gae.mean()) / (gae.std() + self.epsilon)
+
+        trajectory["advantages"] = gae
+        trajectory["value_targets"] = value_targets
+        return gae, value_targets
+
+
+class MergeTimeBatch:
+    """Merges first two axes typically representing time and env batch."""
+
+    def __init__(self, check_shape=True):
+        self.check_shape = check_shape
+
+    def __call__(self, trajectory):
+        if self.check_shape:
+            assert trajectory["terminations"].ndim == 2, trajectory[
+                "terminations"
+            ].shape
+        for key, val in filter(
+            lambda kv: isinstance(kv[1], np.ndarray), trajectory.items()
+        ):
+            trajectory[key] = np.reshape(val, (-1, *val.shape[2:]))
 
 
 class NormalizeAdvantages:
-  """ Normalizes advantages. """
-  def __init__(self, epsilon=1e-8):
-    self.epsilon = epsilon
+    """Normalizes advantages."""
 
-  def __call__(self, trajectory):
-    advantages = trajectory["advantages"]
-    trajectory["advantages"] = ((advantages - advantages.mean())
-                                / (advantages.std() + self.epsilon))
+    def __init__(self, epsilon=1e-8):
+        self.epsilon = epsilon
+
+    def __call__(self, trajectory):
+        advantages = trajectory["advantages"]
+        trajectory["advantages"] = (advantages - advantages.mean()) / (
+            advantages.std() + self.epsilon
+        )
 
 
 class Take:
-  """ Keeps data only from specified indices. """
-  def __init__(self, indices, axis=1):
-    self.indices = indices
-    self.axis = axis
+    """Keeps data only from specified indices."""
 
-  def __call__(self, trajectory):
-    for key, val in filter(lambda kv: kv[0] != "state", trajectory.items()):
-      trajectory[key] = np.take(val, self.indices, axis=self.axis)
+    def __init__(self, indices, axis=1):
+        self.indices = indices
+        self.axis = axis
+
+    def __call__(self, trajectory):
+        for key, val in filter(lambda kv: kv[0] != "state", trajectory.items()):
+            trajectory[key] = np.take(val, self.indices, axis=self.axis)
