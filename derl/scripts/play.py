@@ -6,6 +6,7 @@ import re
 import time
 from collections import UserList
 
+import numpy as np
 import torch
 
 # pylint: disable=no-member
@@ -53,11 +54,15 @@ def record(env, policy, output_filepath, seed=0, nepisodes=1, fps=30):
     recording.output_filepath = output_filepath
     recording.frames = FramesList()
     recording.recording_period = float("inf")
+
+    state = policy.get_initial_state(1)
+    resets = np.zeros(1, bool)
     obs, _ = env.reset(seed=seed)
     while nepisodes > 0:
-        act = policy.act(obs)
+        act = policy.act(obs, state, resets)
         obs, _, terminated, truncated, info = env.step(act["actions"])
-        recording.frames.clear()
+        state = act["policy_state"]
+        resets[:] = terminated | truncated
         if info.get("real_done", terminated | truncated):
             nepisodes -= 1
             if nepisodes > 0:
@@ -116,6 +121,7 @@ def get_parser():
     parser = argparse.ArgumentParser(
         description="Records a video of an agent interacting with an environment."
     )
+    parser.add_argument("--recurrent", action="store_true")
     parser.add_argument("--model")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--nepisodes", type=int, default=1)
@@ -152,7 +158,7 @@ def play(env_id, factory, logdir, args=None):
         output_filepath = os.path.join(logdir, filename)
 
     env = factory.make_env(env_id, nenvs=None, num_recordings=args.nepisodes)
-    runner = factory.make_runner(env)
+    runner = factory.make_runner(env, recurrent=args.recurrent)
     state_dict = torch.load(model_filepath, map_location="cpu", weights_only=True)
     print(f"Loading model {model_filepath}")
     runner.policy.model.load_state_dict(state_dict)
