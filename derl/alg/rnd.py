@@ -184,6 +184,9 @@ class RNDGAE(GAE):
         trajectory["terminations"] = np.stack(
             [trajectory["terminations"], np.zeros_like(trajectory["terminations"])], -1
         )
+        trajectory["truncations"] = np.stack(
+            [trajectory["truncations"], trajectory["truncations"]], -1
+        )
         advantages, value_targets = super().__call__(trajectory)
         trajectory["advantages"] = (
             self.extrinsic_coef * advantages[..., 0]
