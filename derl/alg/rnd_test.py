@@ -26,14 +26,14 @@ class DummyEnv(gym.Env):
   nenvs = 1
 
   def __init__(self):
-    self.observation_space = gym.spaces.Box(0., 1., shape=(3,))
+    self.observation_space = gym.spaces.Box(0., 1., shape=(3, 3, 1))
     self.action_space = gym.spaces.Discrete(2)
 
   def step(self, action):
-    return np.ones(4, dtype=np.float32), 0., False, False, {}
+    return np.ones((3, 3, 1), dtype=np.float32), 0., False, False, {}
 
   def reset(self, **_kwargs):
-    return np.zeros(4, dtype=np.float32), {}
+    return np.zeros((3, 3, 1), dtype=np.float32), {}
 
   def render(self):
     return None
@@ -138,8 +138,8 @@ def test_intrinsic_reward_wrapper():
   assert extrinsic == 0.
   # obs[..., -1] == 1., predictor(1.) = [2.5, 1.5] and target(1.) = [1., 1.]
   # so the intrinsic reward is mean((2.5 - 1.)^2, (1.5 - 1.)^2) == 1.25
-  nt.assert_allclose(obs, np.ones(4))
-  assert intrinsic.shape == ()
+  nt.assert_allclose(obs, np.ones((3, 3, 1)))
+  assert intrinsic.shape == (3, 3)
   nt.assert_allclose(intrinsic, 1.25, rtol=0, atol=1e-6)
 
 
