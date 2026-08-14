@@ -204,6 +204,7 @@ def mujoco_env(env_id, nenvs=None, seed=None, render_mode="rgb_array", **kwargs)
             mujoco_env,
             [
                 dict(
+                    env_id=env_id,
                     seed=s,
                     recording_period=None,
                     render_mode=render_mode,
