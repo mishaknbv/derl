@@ -69,7 +69,7 @@ class GAE:
 
         observation = trajectory["state"]["latest_observations"]
         state = trajectory.get("policy_state", [None])[-1]
-        last_value = self.policy.act(observation, state=state, resets=resets)[
+        last_value = self.policy.act(observation, state=state, resets=resets[-1:])[
             "values"
         ]
 
