@@ -1,8 +1,8 @@
 # pylint: disable=missing-docstring
 import numpy as np
 import numpy.testing as nt
-from derl.runners.storage import InteractionStorage
 
+from derl.runners.storage import InteractionStorage
 
 FOUR_INTERACTIONS_BATCH = dict(
     observations=np.asarray([0, 1, 2, 3]),
@@ -13,62 +13,62 @@ FOUR_INTERACTIONS_BATCH = dict(
 
 
 def test_sample_not_full():
-  storage = InteractionStorage(capacity=10, nstep=1)
-  interactions = FOUR_INTERACTIONS_BATCH
-  storage.add_batch(**interactions)
-  assert storage.index == 4
-  nt.assert_equal(storage.arrays.observations[:storage.index],
-                  interactions["observations"])
-  nt.assert_equal(storage.arrays.actions[:storage.index],
-                  interactions["actions"])
-  nt.assert_allclose(storage.arrays.rewards[:storage.index],
-                     interactions["rewards"])
-  nt.assert_equal(storage.arrays.terminations[:storage.index],
-                  interactions["terminations"])
-  np.random.seed(3)
-  nt.assert_equal(np.random.randint(3), 2)
-  np.random.seed(3)
-  sample = storage.sample(1)
-  nt.assert_equal(sample["observations"], [2])
-  nt.assert_equal(sample["actions"], [-3])
-  nt.assert_allclose(sample["rewards"], [[0.3]])
-  nt.assert_equal(sample["terminations"], [[False]])
-  nt.assert_equal(sample["next_observations"], [3])
+    storage = InteractionStorage(capacity=10, nstep=1)
+    interactions = FOUR_INTERACTIONS_BATCH
+    storage.add_batch(**interactions)
+    assert storage.index == 4
+    nt.assert_equal(
+        storage.arrays.observations[: storage.index], interactions["observations"]
+    )
+    nt.assert_equal(storage.arrays.actions[: storage.index], interactions["actions"])
+    nt.assert_allclose(storage.arrays.rewards[: storage.index], interactions["rewards"])
+    nt.assert_equal(
+        storage.arrays.terminations[: storage.index], interactions["terminations"]
+    )
+    np.random.seed(3)
+    nt.assert_equal(np.random.randint(3), 2)
+    np.random.seed(3)
+    sample = storage.sample(1)
+    nt.assert_equal(sample["observations"], [2])
+    nt.assert_equal(sample["actions"], [-3])
+    nt.assert_allclose(sample["rewards"], [[0.3]])
+    nt.assert_equal(sample["terminations"], [[False]])
+    nt.assert_equal(sample["next_observations"], [3])
 
 
 def test_sample_full():
-  storage = InteractionStorage(capacity=4, nstep=2)
-  interactions = FOUR_INTERACTIONS_BATCH
-  storage.add_batch(**interactions)
-  assert storage.index == 0
-  nt.assert_equal(storage.arrays.observations, interactions["observations"])
-  nt.assert_equal(storage.arrays.actions, interactions["actions"])
-  nt.assert_allclose(storage.arrays.rewards, interactions["rewards"])
-  nt.assert_equal(storage.arrays.terminations, interactions["terminations"])
-  np.random.seed(0)
-  nt.assert_equal(np.random.randint(2, size=2), [0, 1])
-  np.random.seed(0)
-  sample = storage.sample(size=2)
-  nt.assert_equal(sample["observations"], [0, 1])
-  nt.assert_equal(sample["actions"], [-1, -2])
-  nt.assert_allclose(sample["rewards"], [[0.1, 0.2], [0.2, 0.3]])
-  nt.assert_equal(sample["terminations"], [[False, True], [True, False]])
-  nt.assert_equal(sample["next_observations"], [2, 3])
+    storage = InteractionStorage(capacity=4, nstep=2)
+    interactions = FOUR_INTERACTIONS_BATCH
+    storage.add_batch(**interactions)
+    assert storage.index == 0
+    nt.assert_equal(storage.arrays.observations, interactions["observations"])
+    nt.assert_equal(storage.arrays.actions, interactions["actions"])
+    nt.assert_allclose(storage.arrays.rewards, interactions["rewards"])
+    nt.assert_equal(storage.arrays.terminations, interactions["terminations"])
+    np.random.seed(0)
+    nt.assert_equal(np.random.randint(2, size=2), [0, 1])
+    np.random.seed(0)
+    sample = storage.sample(size=2)
+    nt.assert_equal(sample["observations"], [0, 1])
+    nt.assert_equal(sample["actions"], [-1, -2])
+    nt.assert_allclose(sample["rewards"], [[0.1, 0.2], [0.2, 0.3]])
+    nt.assert_equal(sample["terminations"], [[False, True], [True, False]])
+    nt.assert_equal(sample["next_observations"], [2, 3])
 
 
 def test_sample_cycle():
-  storage = InteractionStorage(capacity=3, nstep=2)
-  storage.add_batch(**FOUR_INTERACTIONS_BATCH)
-  nt.assert_equal(storage.arrays.observations, [3, 1, 2])
-  nt.assert_equal(storage.arrays.actions, [-4, -2, -3])
-  nt.assert_allclose(storage.arrays.rewards, [0.4, 0.2, 0.3])
-  nt.assert_equal(storage.arrays.terminations, [True, True, False])
-  np.random.seed(0)
-  nt.assert_equal(np.random.randint(storage.capacity - storage.nstep), 0)
-  np.random.seed(0)
-  sample = storage.sample(1)
-  nt.assert_equal(sample["observations"], [1])
-  nt.assert_equal(sample["actions"], [-2])
-  nt.assert_allclose(sample["rewards"], [[0.2, 0.3]])
-  nt.assert_equal(sample["terminations"], [[True, False]])
-  nt.assert_equal(sample["next_observations"], [3])
+    storage = InteractionStorage(capacity=3, nstep=2)
+    storage.add_batch(**FOUR_INTERACTIONS_BATCH)
+    nt.assert_equal(storage.arrays.observations, [3, 1, 2])
+    nt.assert_equal(storage.arrays.actions, [-4, -2, -3])
+    nt.assert_allclose(storage.arrays.rewards, [0.4, 0.2, 0.3])
+    nt.assert_equal(storage.arrays.terminations, [True, True, False])
+    np.random.seed(0)
+    nt.assert_equal(np.random.randint(storage.capacity - storage.nstep), 0)
+    np.random.seed(0)
+    sample = storage.sample(1)
+    nt.assert_equal(sample["observations"], [1])
+    nt.assert_equal(sample["actions"], [-2])
+    nt.assert_allclose(sample["rewards"], [[0.2, 0.3]])
+    nt.assert_equal(sample["terminations"], [[True, False]])
+    nt.assert_equal(sample["next_observations"], [3])

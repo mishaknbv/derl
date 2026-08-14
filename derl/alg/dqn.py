@@ -1,167 +1,187 @@
-""" Deep Q-learning algorithm implementation. """
+"""Deep Q-learning algorithm implementation."""
+
 from copy import deepcopy
+
 import torch
 import torch.nn.functional as F
-from derl.alg.common import Loss, Alg, r_squared
+
 from derl import summary
+from derl.alg.common import Alg, Loss, r_squared
 
 
 class TargetUpdater:
-  """ Provides interface for updating target model with a given period. """
-  def __init__(self, model, target, period=10_000):
-    self.model = model
-    self.target = target
-    if period is None:
-      period = float("inf")
-    self.period = period
-    self.last_update_step = -float("inf")
+    """Provides interface for updating target model with a given period."""
 
-  def should_update(self, step_count):
-    """ Returns true if it is time to update target model. """
-    return step_count - self.last_update_step >= self.period
+    def __init__(self, model, target, period=10_000):
+        self.model = model
+        self.target = target
+        if period is None:
+            period = float("inf")
+        self.period = period
+        self.last_update_step = -float("inf")
 
-  def update(self, step_count):
-    """ Updates target model variables with the trained model variables. """
-    self.target.load_state_dict(self.model.state_dict())
-    self.last_update_step = step_count
+    def should_update(self, step_count):
+        """Returns true if it is time to update target model."""
+        return step_count - self.last_update_step >= self.period
+
+    def update(self, step_count):
+        """Updates target model variables with the trained model variables."""
+        self.target.load_state_dict(self.model.state_dict())
+        self.last_update_step = step_count
 
 
 def huber_loss(predictions, targets, weights=None):
-  """ Huber loss with weights for each element in batch. """
-  if weights is None:
-    return F.smooth_l1_loss(predictions, targets)
-  losses = F.smooth_l1_loss(predictions, targets, reduction='none')
-  return torch.mean(weights * losses)
+    """Huber loss with weights for each element in batch."""
+    if weights is None:
+        return F.smooth_l1_loss(predictions, targets)
+    losses = F.smooth_l1_loss(predictions, targets, reduction="none")
+    return torch.mean(weights * losses)
 
 
 def qr_dqn_loss(qtargets, qvalues, weights=None):
-  """ QR-DQN loss. """
-  batch_size, num_quantiles = qtargets.shape
-  if weights is None:
-    weights = torch.ones(batch_size).to(qtargets.device)
-  nbins = qtargets.shape[-1]
-  arange = torch.arange(nbins + 1).to(qtargets.device)
-  tau = 0.5 * arange[:-1] + 0.5 * arange[1:]
-  target_shape = torch.Size([batch_size, num_quantiles, num_quantiles])
-  qtargets = torch.broadcast_to(qtargets[:, :, None], target_shape)
-  qvalues = torch.broadcast_to(qvalues[:, None], target_shape)
-  weights = (
-    weights[:, None, None]
-    * torch.abs(tau - (qtargets < qvalues).detach().to(torch.float32))
-  )
-  return huber_loss(qvalues, qtargets, weights)
+    """QR-DQN loss."""
+    batch_size, num_quantiles = qtargets.shape
+    if weights is None:
+        weights = torch.ones(batch_size).to(qtargets.device)
+    nbins = qtargets.shape[-1]
+    arange = torch.arange(nbins + 1).to(qtargets.device)
+    tau = 0.5 * arange[:-1] + 0.5 * arange[1:]
+    target_shape = torch.Size([batch_size, num_quantiles, num_quantiles])
+    qtargets = torch.broadcast_to(qtargets[:, :, None], target_shape)
+    qvalues = torch.broadcast_to(qvalues[:, None], target_shape)
+    weights = weights[:, None, None] * torch.abs(
+        tau - (qtargets < qvalues).detach().to(torch.float32)
+    )
+    return huber_loss(qvalues, qtargets, weights)
 
 
 class DQNLoss(Loss):
-  """ Deep Q-Learning algorithm loss function.
+    """Deep Q-Learning algorithm loss function.
 
-  See [Mnih et al.](
-  https://web.stanford.edu/class/psych209/Readings/MnihEtAlHassibis15NatureControlDeepRL.pdf).
-  """
-  def __init__(self, model, target_model, gamma=0.99, double=True, name=None):
-    super().__init__(model, name)
-    self.target_model = target_model
-    self.gamma = gamma
-    self.double = double
-
-  def make_predictions(self, observations, actions=None):
-    """ Applies a model to given observations and selects
-    predictions based on actions.
-
-    If actions are specified uses training model, otherwise target model.
-    If actions are not given uses argmax over training model or
-    target model (depending on self.double flag) to compute them.
+    See [Mnih et al.](
+    https://web.stanford.edu/class/psych209/Readings/MnihEtAlHassibis15NatureControlDeepRL.pdf).
     """
-    if actions is None:
-      with torch.no_grad():
-        outputs = self.target_model(observations)
-        qvalues = outputs if outputs.ndim == 2 else outputs.mean(-1)
-        if self.double:
-          model_outputs = self.model(observations)
-          qvalues = (model_outputs if model_outputs.ndim == 2
-                     else model_outputs.mean(-1))
-        actions = torch.argmax(qvalues, -1)
-    else:
-      outputs = self.model(observations)
-    outputs = outputs[torch.arange(outputs.shape[0]), actions]
-    return outputs
 
-  def compute_targets(self, rewards, terminations, next_obs):
-    """ Computes target values. """
-    nsteps = rewards.shape[1]
-    targets = self.make_predictions(next_obs)
-    terminations = terminations.type(targets.dtype)
+    def __init__(self, model, target_model, gamma=0.99, double=True, name=None):
+        super().__init__(model, name)
+        self.target_model = target_model
+        self.gamma = gamma
+        self.double = double
 
-    if len({rewards.shape, terminations.shape}) != 1:
-      raise ValueError(
-          "rewards, terminations must have the same shapes, "
-          f"got rewards.shape={rewards.shape}, "
-          f"terminations.shape={terminations.shape}")
-    if targets.ndim == 2:
-      rewards = rewards[:, :, None]
-      terminations = terminations[:, :, None]
+    def make_predictions(self, observations, actions=None):
+        """Applies a model to given observations and selects
+        predictions based on actions.
 
-    for t in reversed(range(nsteps)):
-      targets = rewards[:, t] + (1 - terminations[:, t]) * self.gamma * targets
-    return targets
+        If actions are specified uses training model, otherwise target model.
+        If actions are not given uses argmax over training model or
+        target model (depending on self.double flag) to compute them.
+        """
+        if actions is None:
+            with torch.no_grad():
+                outputs = self.target_model(observations)
+                qvalues = outputs if outputs.ndim == 2 else outputs.mean(-1)
+                if self.double:
+                    model_outputs = self.model(observations)
+                    qvalues = (
+                        model_outputs
+                        if model_outputs.ndim == 2
+                        else model_outputs.mean(-1)
+                    )
+                actions = torch.argmax(qvalues, -1)
+        else:
+            outputs = self.model(observations)
+        outputs = outputs[torch.arange(outputs.shape[0]), actions]
+        return outputs
 
-  def __call__(self, data):
-    obs, actions, rewards, terminations, next_obs = (
-        self.torch_from_numpy(data[k]) for k in (
-            "observations", "actions", "rewards",
-            "terminations", "next_observations"))
+    def compute_targets(self, rewards, terminations, next_obs):
+        """Computes target values."""
+        nsteps = rewards.shape[1]
+        targets = self.make_predictions(next_obs)
+        terminations = terminations.type(targets.dtype)
 
-    qtargets = self.compute_targets(rewards, terminations, next_obs)
-    qvalues = self.make_predictions(obs, actions)
-    if "update_priorities" in data:
-      errors = qtargets - qvalues
-      if errors.ndim == 2:
-        errors = torch.abs(errors.mean(-1))
-      else:
-        errors = torch.abs(errors)
-      data["update_priorities"](errors.cpu().detach().numpy())
+        if len({rewards.shape, terminations.shape}) != 1:
+            raise ValueError(
+                "rewards, terminations must have the same shapes, "
+                f"got rewards.shape={rewards.shape}, "
+                f"terminations.shape={terminations.shape}"
+            )
+        if targets.ndim == 2:
+            rewards = rewards[:, :, None]
+            terminations = terminations[:, :, None]
 
-    weights = None
-    loss = None
-    if "weights" in data:
-      weights = self.torch_from_numpy(data["weights"])
-    if qtargets.ndim == 2:
-      loss = qr_dqn_loss(qtargets, qvalues, weights=weights)
-    else:
-      loss = huber_loss(qtargets, qvalues, weights=weights)
+        for t in reversed(range(nsteps)):
+            targets = rewards[:, t] + (1 - terminations[:, t]) * self.gamma * targets
+        return targets
 
-    if summary.should_record():
-      summary.add_scalar(f"{self.name}/r_squared",
-                         r_squared(qtargets, qvalues),
-                         global_step=self.call_count)
-      summary.add_scalar(f"{self.name}/loss", loss,
-                         global_step=self.call_count)
-    self.call_count += 1
-    return loss
+    def __call__(self, data):
+        obs, actions, rewards, terminations, next_obs = (
+            self.torch_from_numpy(data[k])
+            for k in (
+                "observations",
+                "actions",
+                "rewards",
+                "terminations",
+                "next_observations",
+            )
+        )
+
+        qtargets = self.compute_targets(rewards, terminations, next_obs)
+        qvalues = self.make_predictions(obs, actions)
+        if "update_priorities" in data:
+            errors = qtargets - qvalues
+            if errors.ndim == 2:
+                errors = torch.abs(errors.mean(-1))
+            else:
+                errors = torch.abs(errors)
+            data["update_priorities"](errors.cpu().detach().numpy())
+
+        weights = None
+        loss = None
+        if "weights" in data:
+            weights = self.torch_from_numpy(data["weights"])
+        if qtargets.ndim == 2:
+            loss = qr_dqn_loss(qtargets, qvalues, weights=weights)
+        else:
+            loss = huber_loss(qtargets, qvalues, weights=weights)
+
+        if summary.should_record():
+            summary.add_scalar(
+                f"{self.name}/r_squared",
+                r_squared(qtargets, qvalues),
+                global_step=self.call_count,
+            )
+            summary.add_scalar(f"{self.name}/loss", loss, global_step=self.call_count)
+        self.call_count += 1
+        return loss
 
 
 class DQN(Alg):
-  """ Deep Q-Learning algorithm.
+    """Deep Q-Learning algorithm.
 
-  See [Mnih et al.](
-  https://web.stanford.edu/class/psych209/Readings/MnihEtAlHassibis15NatureControlDeepRL.pdf).
-  """
-  def __init__(self, runner, trainer,
-               target_model=None, target_update_period=10_000,
-               name=None, **loss_kwargs):
-    model = runner.policy.model
-    if target_model is None:
-      target_model = deepcopy(model)
-    loss_fn = DQNLoss(model, target_model,
-                      name=name, **loss_kwargs)
-    super().__init__(runner, trainer, loss_fn, name=name)
-    self.target_updater = TargetUpdater(model, target_model,
-                                        target_update_period)
-    self.step_count = 0
+    See [Mnih et al.](
+    https://web.stanford.edu/class/psych209/Readings/MnihEtAlHassibis15NatureControlDeepRL.pdf).
+    """
 
-  def step(self, data):
-    if self.target_updater.should_update(self.step_count):
-      self.target_updater.update(self.step_count)
-    loss = super().step(data)
-    self.step_count += 1
-    return loss
+    def __init__(
+        self,
+        runner,
+        trainer,
+        target_model=None,
+        target_update_period=10_000,
+        name=None,
+        **loss_kwargs,
+    ):
+        model = runner.policy.model
+        if target_model is None:
+            target_model = deepcopy(model)
+        loss_fn = DQNLoss(model, target_model, name=name, **loss_kwargs)
+        super().__init__(runner, trainer, loss_fn, name=name)
+        self.target_updater = TargetUpdater(model, target_model, target_update_period)
+        self.step_count = 0
+
+    def step(self, data):
+        if self.target_updater.should_update(self.step_count):
+            self.target_updater.update(self.step_count)
+        loss = super().step(data)
+        self.step_count += 1
+        return loss

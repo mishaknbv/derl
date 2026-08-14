@@ -37,6 +37,9 @@ jobs:
       continue-on-error: true
       run: |
         pylint derl
+    - name: Lint with ruff
+      run: |
+        ruff check derl
     - name: Run tests
       if: ${{ matrix.os == 'macos-latest' && matrix.python-version == '3.13.13' }}
       env:

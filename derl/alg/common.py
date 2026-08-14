@@ -1,120 +1,124 @@
-""" Defines algorithm base class and various utils. """
-from abc import ABC, abstractmethod
+"""Defines algorithm base class and various utils."""
+
 import os
+from abc import ABC, abstractmethod
 
 import torch
 from tqdm import tqdm
+
 from derl import summary
 
 
 def r_squared(targets, predictions):
-  """ Computes coefficient of determination. """
-  variance = torch.pow(predictions.std(), 2)
-  return 1. - torch.mean(torch.pow(predictions - targets, 2)) / variance
+    """Computes coefficient of determination."""
+    variance = torch.pow(predictions.std(), 2)
+    return 1.0 - torch.mean(torch.pow(predictions - targets, 2)) / variance
 
 
 def total_norm(tensors, norm_type=2):
-  """ Computes total norm of the tensors as if concatenated into 1 vector. """
-  if norm_type == float('inf'):
-    return max(t.abs().max() for t in tensors)
-  return sum(t.norm(norm_type) ** norm_type
-             for t in tensors) ** (1. / norm_type)
+    """Computes total norm of the tensors as if concatenated into 1 vector."""
+    if norm_type == float("inf"):
+        return max(t.abs().max() for t in tensors)
+    return sum(t.norm(norm_type) ** norm_type for t in tensors) ** (1.0 / norm_type)
 
 
 class Loss(ABC):
-  """ Algorithm loss function. """
-  def __init__(self, model, name=None):
-    self.model = model
-    if name is None:
-      name = self.__class__.__name__
-      name = name[:-len("Loss")] if name.endswith("Loss") else name
-      name = name.lower()
-    self.name = name
-    self.call_count = 0
+    """Algorithm loss function."""
 
-  @property
-  def device(self):
-    """ Returns device of the underlying model. """
-    return next(self.model.parameters()).device
+    def __init__(self, model, name=None):
+        self.model = model
+        if name is None:
+            name = self.__class__.__name__
+            name = name.removesuffix("Loss")
+            name = name.lower()
+        self.name = name
+        self.call_count = 0
 
-  def torch_from_numpy(self, arr):
-    """ Casts np.ndarray to torch.Tensor and moves to model device. """
-    dtype = None # if arr.dtype != np.float64 else torch.float32
-    return torch.from_numpy(arr).to(device=self.device, dtype=dtype)
+    @property
+    def device(self):
+        """Returns device of the underlying model."""
+        return next(self.model.parameters()).device
 
-  @abstractmethod
-  def __call__(self, data):
-    """ Computes and returns loss value on given data. """
+    def torch_from_numpy(self, arr):
+        """Casts np.ndarray to torch.Tensor and moves to model device."""
+        dtype = None  # if arr.dtype != np.float64 else torch.float32
+        return torch.from_numpy(arr).to(device=self.device, dtype=dtype)
+
+    @abstractmethod
+    def __call__(self, data):
+        """Computes and returns loss value on given data."""
 
 
 class Trainer:
-  """ Class to perform algorithm training. """
-  def __init__(self, optimizer, anneals=None, max_grad_norm=None):
-    self.optimizer = optimizer
-    self.anneals = anneals or []
-    self.max_grad_norm = max_grad_norm
-    self.step_count = 0
+    """Class to perform algorithm training."""
 
-  def preprocess_gradients(self, parameters, tag):
-    """ Applies gradient preprocessing. """
-    grad_norm = None
-    if self.max_grad_norm is not None:
-      grad_norm = torch.nn.utils.clip_grad_norm_(parameters, self.max_grad_norm)
-    if summary.should_record():
-      if grad_norm is None:
-        grad_norm = total_norm(p.grad for p in parameters if p.grad is not None)
-      summary.add_scalar(tag, grad_norm, global_step=self.step_count)
+    def __init__(self, optimizer, anneals=None, max_grad_norm=None):
+        self.optimizer = optimizer
+        self.anneals = anneals or []
+        self.max_grad_norm = max_grad_norm
+        self.step_count = 0
 
-  def step(self, alg, data):
-    """ Performs single training step of a given algorithm. """
-    loss = alg.loss(data)
-    self.optimizer.zero_grad()
-    loss.backward()
-    self.preprocess_gradients(alg.model.parameters(), f"{alg.name}/grad_norm")
-    for anneal in self.anneals:
-      if summary.should_record():
-        anneal.summarize(alg.runner.step_count)
-      anneal.step_to(alg.runner.step_count)
-    self.optimizer.step()
-    self.step_count += 1
-    return loss
+    def preprocess_gradients(self, parameters, tag):
+        """Applies gradient preprocessing."""
+        grad_norm = None
+        if self.max_grad_norm is not None:
+            grad_norm = torch.nn.utils.clip_grad_norm_(parameters, self.max_grad_norm)
+        if summary.should_record():
+            if grad_norm is None:
+                grad_norm = total_norm(p.grad for p in parameters if p.grad is not None)
+            summary.add_scalar(tag, grad_norm, global_step=self.step_count)
+
+    def step(self, alg, data):
+        """Performs single training step of a given algorithm."""
+        loss = alg.loss(data)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.preprocess_gradients(alg.model.parameters(), f"{alg.name}/grad_norm")
+        for anneal in self.anneals:
+            if summary.should_record():
+                anneal.summarize(alg.runner.step_count)
+            anneal.step_to(alg.runner.step_count)
+        self.optimizer.step()
+        self.step_count += 1
+        return loss
 
 
 class Alg:
-  """ Generic learning algorithm specified by its loss function. """
-  def __init__(self, runner, trainer, loss_fn, name=None):
-    self.runner = runner
-    self.model = self.runner.policy.model
-    self.trainer = trainer
-    self.loss_fn = loss_fn
-    if name is None:
-      name = self.__class__.__name__.lower()
-    self.name = name
+    """Generic learning algorithm specified by its loss function."""
 
-  def loss(self, data):
-    """ Computes and returns the loss function on data. """
-    return self.loss_fn(data)
+    def __init__(self, runner, trainer, loss_fn, name=None):
+        self.runner = runner
+        self.model = self.runner.policy.model
+        self.trainer = trainer
+        self.loss_fn = loss_fn
+        if name is None:
+            name = self.__class__.__name__.lower()
+        self.name = name
 
-  def step(self, data):
-    """ Performs learning step of the algorithm. """
-    loss = self.trainer.step(self, data)
-    return loss
+    def loss(self, data):
+        """Computes and returns the loss function on data."""
+        return self.loss_fn(data)
 
-  def dump_model(self, model_filename="model-{step}.pt"):
-    """ Saves the model to the file. """
-    model_filename = model_filename.format(step=self.runner.step_count)
-    model_filepath = os.path.join(summary.writer.log_dir, model_filename)
-    torch.save(self.model.state_dict(), model_filepath)
+    def step(self, data):
+        """Performs learning step of the algorithm."""
+        loss = self.trainer.step(self, data)
+        return loss
 
-  def learn(self, model_dump_period=20e6, model_filename="model-{step}.pt"):
-    """ Performs learning with this algorithm. """
-    self.runner.policy.model.compile()
-    model_dump_step = -model_dump_period
-    with tqdm(total=len(self.runner)) as pbar:
-      for data in self.runner.run():
-        pbar.update(self.runner.step_count - pbar.n)
-        self.step(data)
-        if self.runner.step_count - model_dump_step >= model_dump_period:
-          self.dump_model(model_filename)
-          model_dump_step = model_dump_step + model_dump_period
-    self.dump_model(model_filename)
+    def dump_model(self, model_filename="model-{step}.pt"):
+        """Saves the model to the file."""
+        model_filename = model_filename.format(step=self.runner.step_count)
+        model_filepath = os.path.join(summary.writer.log_dir, model_filename)
+        torch.save(self.model.state_dict(), model_filepath)
+
+    def learn(self, model_dump_period=20e6, model_filename="model-{step}.pt"):
+        """Performs learning with this algorithm."""
+        self.runner.policy.model.compile()
+        model_dump_step = -model_dump_period
+        with tqdm(total=len(self.runner)) as pbar:
+            for data in self.runner.run():
+                pbar.update(self.runner.step_count - pbar.n)
+                self.step(data)
+                if self.runner.step_count - model_dump_step >= model_dump_period:
+                    self.dump_model(model_filename)
+                    model_dump_step = model_dump_step + model_dump_period
+        self.dump_model(model_filename)
