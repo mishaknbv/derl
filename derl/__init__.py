@@ -9,10 +9,10 @@ from .anneal import (
 )
 from .factory import *
 from .models import (
-    LSTMCNN,
     MLP,
     SACMLP,
     ContinuousQValueModel,
+    LSTMModel,
     MuJoCoModel,
     NatureCNNBase,
     NatureCNNModel,
@@ -50,7 +50,6 @@ __all__ = [
     "A2C",
     "DQN",
     "GAE",
-    "LSTMCNN",
     "MLP",
     "PPO",
     "RND",
@@ -75,6 +74,7 @@ __all__ = [
     "Factory",
     "InteractionStorage",
     "IterateWithMinibatches",
+    "LSTMModel",
     "LinearAnneal",
     "Loss",
     "MergeTimeBatch",

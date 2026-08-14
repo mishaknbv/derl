@@ -5,6 +5,7 @@ from torch.optim import Adam
 from derl.alg.common import Trainer
 from derl.alg.ppo import PPO
 from derl.anneal import LinearAnneal
+from derl.env.make_env import is_atari_id
 from derl.factory.factory import Factory
 from derl.models import make_model
 from derl.policies import ActorCriticPolicy
@@ -38,6 +39,7 @@ class PPOFactory(Factory):
                 "num-train-steps": 1e6,
                 "num-recordings": 10,
                 "nenvs": dict(type=int, default=None),
+                "recurrent": dict(action="store_true"),
                 "num-runner-steps": 2048,
                 "gamma": 0.99,
                 "lambda_": 0.95,
@@ -55,18 +57,17 @@ class PPOFactory(Factory):
 
     def make_env(self, env_id, **kwargs):
         self.config |= kwargs
-        recurrent = getattr(self.config, "recurrent", False)
-        env = super().make_env(
-            env_id, nenvs=self.nenvs, num_queue_frames=1 if recurrent else 4
-        )
+        env_kwargs = {}
+        if is_atari_id(env_id):
+            env_kwargs["num_queue_frames"] = 1 if self.recurrent else 4
+        env = super().make_env(env_id, nenvs=self.nenvs, **env_kwargs)
         return env
 
     def make_runner(self, env, model=None, nlogs=1e5, **kwargs):
         self.config |= kwargs
         if model is None:
-            recurrent = getattr(self.config, "recurrent", False)
             model = make_model(env.observation_space, env.action_space, 1,
-                               recurrent=recurrent)
+                               recurrent=self.recurrent)
         policy = ActorCriticPolicy(model)
         runner = make_ppo_runner(
             env,

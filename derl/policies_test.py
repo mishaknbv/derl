@@ -2,7 +2,7 @@
 import numpy as np
 import torch
 
-from derl.models import LSTMCNN, MuJoCoModel, NatureCNNModel
+from derl.models import LSTMModel, MuJoCoModel, NatureCNNModel
 from derl.policies import ActorCriticPolicy, EpsilonGreedyPolicy
 from derl.testing import assert_all_close
 
@@ -19,7 +19,7 @@ def test_actor_critic_categorical():
 
 
 def test_actor_critic_recurrent():
-    model = LSTMCNN((6, 1))
+    model = LSTMModel.make_cnn((84, 84, 1), (6, 1))
     policy = ActorCriticPolicy(model)
     state = policy.get_initial_state(1)
     act = policy.act(torch.randn(84, 84, 1), state, torch.zeros(1, dtype=bool))

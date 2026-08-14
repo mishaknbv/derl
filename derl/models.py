@@ -276,8 +276,8 @@ class NatureCNNModel(nn.Module):
         return outputs
 
 
-class LSTMCNN(nn.Module):
-    """Actor-critic model with a recurrent (LSTM) layer.
+class LSTMModel(nn.Module):
+    """ Model with LSTM.
 
     Observations are expected to have shape
     `(time, batch) + observation_shape`, the recurrent state has shape
@@ -287,13 +287,15 @@ class LSTMCNN(nn.Module):
 
     def __init__(
         self,
+        base,
         output_units,
-        input_shape=(84, 84, 1),
         hidden_size=256,
+        logstd=False,
         init_fn=orthogonal_init,
+        **base_kwargs,
     ):
         super().__init__()
-        self.base = NatureCNNBase(input_shape, noisy=False)
+        self.base = base(**base_kwargs)
         if not isinstance(output_units, (tuple, list)):
             output_units = [output_units]
         self.output_units = list(output_units)
@@ -306,7 +308,23 @@ class LSTMCNN(nn.Module):
         self.init_fn = init_fn
         if self.init_fn:
             self.apply(self.init_fn)
+        self.logstd = nn.Parameter(torch.zeros(output_units[0])) if logstd else None
         self.to(get_device())
+
+    @classmethod
+    def make_cnn(cls, input_shape, output_units, **kwargs):
+        """ Creates LSTM model with NatureCNNBase as base. """
+        return cls(base=NatureCNNBase, input_shape=input_shape,
+                   output_units=output_units, **kwargs)
+
+    @classmethod
+    def make_mlp(cls, observation_dim, output_units, logstd=True,
+                 hidden_features=(64,), **kwargs):
+        """ Creates LSTM model with MLP base. """
+        mlp = partial(MLP, out_features=hidden_features[-1],
+                      hidden_features=hidden_features)
+        return cls(in_features=observation_dim, base=mlp,
+                   output_units=output_units, logstd=logstd, **kwargs)
 
     @property
     def hidden_size(self):
@@ -328,25 +346,38 @@ class LSTMCNN(nn.Module):
             cx = cx * ~resets[t, ..., None] + resets[t, ..., None] * c0
             hx, cx = self.lstm_cell(features[t], (hx, cx))
             outputs.append(hx)
-        return torch.stack(outputs, 0), cx
+        new_states = torch.cat([outputs[-1], cx], 1)
+        return torch.stack(outputs, 0), new_states
 
-    @collocate_inputs(dtype=False)
+    @collocate_inputs(device=False, dtype=False)
     def forward(self, observations, states, resets):
         """Forward propagates given the observations, recurrent states and resets."""
-        expand_dims, observations = broadcast(5, observations)
+        if observations.dtype == torch.float64:
+            observations = observations.to(torch.float32)
+        observations, states, resets = (
+            t.to(next(self.parameters()).device) for t in (observations, states, resets)
+        )
+        expand_dims = 5 if any(isinstance(m, nn.Conv2d) for m in self.modules()) else 3
+        expand_dims, observations = broadcast(expand_dims, observations)
         time, batch_size = observations.shape[:2]
         features = self.base(
             torch.reshape(observations, (-1,) + observations.shape[2:])
         )
         features = torch.reshape(features, (time, batch_size, -1))
-        hidden, cell = self.lstm_for_loop(features, states, resets)
+        hidden, new_states  = self.lstm_for_loop(features, states, resets)
         flat = torch.reshape(hidden, (-1, self.hidden_size))
         outputs = [
             torch.reshape(layer(flat), hidden.shape[:2] + (-1,))
             for layer in self.output_layers
         ]
-        new_states = torch.cat([hidden[-1], cell], 1)
-        return *unbroadcast(expand_dims, outputs), new_states
+        mean, *other = unbroadcast(expand_dims, outputs)
+        if self.logstd is None:
+            return mean, *other, new_states
+        std = torch.exp(self.logstd)[None, None]
+        std = torch.repeat_interleave(std, batch_size, 1)
+        std = torch.repeat_interleave(std, time, 0)
+        std = unbroadcast(expand_dims, std)
+        return mean, std, *other, new_states
 
 
 def pairwise(iterable):
@@ -462,8 +493,9 @@ def make_model(observation_space, action_space, other_outputs=None,
     ):
         output_units = [action_space.n, *other_outputs]
         if recurrent:
-            return LSTMCNN(input_shape=observation_space.shape,
-                           output_units=output_units, **kwargs)
+            return LSTMModel.make_cnn(
+                input_shape=observation_space.shape, output_units=output_units, **kwargs
+            )
         return NatureCNNModel(
             input_shape=observation_space.shape, output_units=output_units, **kwargs
         )
@@ -474,6 +506,9 @@ def make_model(observation_space, action_space, other_outputs=None,
         else action_space.n
     )
     output_units = [action_dim, *other_outputs]
+    if recurrent:
+        return LSTMModel.make_mlp(observation_dim=observation_dim,
+                                  output_units=output_units, **kwargs)
     return MuJoCoModel(
         observation_dim=observation_dim,
         output_units=output_units,

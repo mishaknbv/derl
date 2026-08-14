@@ -6,7 +6,13 @@ import numpy.testing as nt
 import pytest
 import torch
 
-from derl.models import LSTMCNN, MuJoCoModel, NatureCNNBase, NatureCNNModel, NoisyLinear
+from derl.models import (
+    LSTMModel,
+    MuJoCoModel,
+    NatureCNNBase,
+    NatureCNNModel,
+    NoisyLinear,
+)
 from derl.testing import assert_all_close, assert_orthogonal
 
 
@@ -88,7 +94,8 @@ def test_distributional_output_shape():
 
 @pytest.fixture
 def lstm_cnn():
-    return LSTMCNN(output_units=(6, 1))
+    return LSTMModel(output_units=(6, 1), base=NatureCNNBase,
+                     input_shape=(84, 84, 1))
 
 
 def test_lstm_cnn_params(lstm_cnn):
@@ -113,6 +120,34 @@ def test_lstm_cnn_broadcast(lstm_cnn):
     assert logits.shape == torch.Size([6])
     assert value.shape == torch.Size([1])
     assert state.shape == torch.Size([1, 512])
+
+
+@pytest.fixture
+def lstm_mlp():
+    return LSTMModel.make_mlp(observation_dim=17, output_units=(6, 1))
+
+
+def test_lstm_mlp_params(lstm_mlp):
+    assert len(list(lstm_mlp.parameters())) == 2 * 2 + 4 + 1 + 1 + 2 * 2
+
+
+def test_lstm_mlp_broadcast(lstm_mlp):
+    state = lstm_mlp.get_initial_state(1)
+    mean, std, value, state = lstm_mlp(torch.rand(17), state, np.zeros(1, bool))
+    assert mean.shape == torch.Size([6])
+    assert std.shape == torch.Size([6])
+    assert value.shape == torch.Size([1])
+    assert state.shape == torch.Size([1, 512])
+
+
+def test_lstm_mlp_output_shape(lstm_mlp):
+    state = lstm_mlp.get_initial_state(1)
+    mean, std, value, state = lstm_mlp(
+        torch.rand(2, 3, 17), state, torch.zeros(2, 3, dtype=bool))
+    assert mean.shape == torch.Size([2, 3, 6])
+    assert std.shape == torch.Size([2, 3, 6])
+    assert value.shape == torch.Size([2, 3, 1])
+    assert state.shape == torch.Size([3, 512])
 
 
 def test_mujoco_model_params():
