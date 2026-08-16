@@ -1,4 +1,3 @@
-# pylint: skip-file
 """RND factory."""
 
 from derl.alg.rnd import RND, RNDModel, make_rnd_runner
@@ -26,6 +25,7 @@ class RNDFactory(PPOFactory):
                 "num-minibatches": 4,
                 "cliprange": 0.1,
                 "lr": 1e-4,
+                "distill-lr": 1e-3,
                 "optimizer-epsilon": 1e-5,
                 "entropy-coef": 0.001,
                 "prob-distill": 0.25,
@@ -43,6 +43,7 @@ class RNDFactory(PPOFactory):
             episodic_life=False,
             max_random_actions=0,
             repeat_action_prob=0.25,
+            recurrent=False,
         )
         return env
 
@@ -68,13 +69,14 @@ class RNDFactory(PPOFactory):
         return runner
 
     def make_alg(self, runner, trainer, **kwargs):
-        self.config |= kwargs | {"rnd": False}
+        self.config |= kwargs
         rnd = RND(
             runner,
             trainer,
             intrinsic_gamma=self.intrinsic_gamma,
             cliprange=self.cliprange,
             entropy_coef=self.entropy_coef,
+            distill_lr=self.distill_lr,
             prob_distill=self.prob_distill,
         )
         return rnd

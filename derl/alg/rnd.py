@@ -45,11 +45,8 @@ class IntrinsicReward(Normalize):
             cliprew=np.inf,
             gamma=intrinsic_gamma,
         )
-        self.obs_rmv = (
-            RunningMeanVar(shape=self.observation_space.shape[:-1] + (1,))
-            if normalize
-            else None
-        )
+        height, width, _ = self.observation_space.shape
+        self.obs_rmv = RunningMeanVar(shape=(height, width, 1)) if normalize else None
         self.predictor = predictor
         self.target = target
 
@@ -187,6 +184,9 @@ class RNDGAE(GAE):
         trajectory["terminations"] = np.stack(
             [trajectory["terminations"], np.zeros_like(trajectory["terminations"])], -1
         )
+        trajectory["truncations"] = np.stack(
+            [trajectory["truncations"], trajectory["truncations"]], -1
+        )
         advantages, value_targets = super().__call__(trajectory)
         trajectory["advantages"] = (
             self.extrinsic_coef * advantages[..., 0]
@@ -231,6 +231,7 @@ class RND(PPO):
         trainer,
         intrinsic_gamma=0.99,
         num_extra_layers=2,
+        distill_lr=1e-3,
         distill_loss_coef=1.0,
         prob_distill=0.25,
         num_warmup_steps=100,
@@ -238,9 +239,9 @@ class RND(PPO):
     ):
         super().__init__(runner, trainer, **kwargs)
         observation_shape = runner.env.observation_space.shape
-        observation_shape = observation_shape[:-1] + (1,)
+        height, width, _ = observation_shape
         self.target = NatureCNNBase(
-            input_shape=observation_shape, activation=nn.LeakyReLU
+            input_shape=(height, width, 1), activation=nn.LeakyReLU
         ).to(get_device())
         self.predictor = PredictorModel(
             deepcopy(self.target),
@@ -252,7 +253,7 @@ class RND(PPO):
         self.trainer.optimizer.add_param_group(
             {
                 "params": self.predictor.parameters(),
-                "lr": self.trainer.optimizer.param_groups[0]["lr"],
+                "lr": distill_lr,
             }
         )
 
@@ -280,7 +281,10 @@ class RND(PPO):
         )
 
         sample = torch.rand(batch_size).to(intrinsic_reward.device)
-        distill_loss = torch.mean((sample < self.prob_distill) * intrinsic_reward)
+        mask = sample < self.prob_distill
+        distill_loss = torch.sum(mask * intrinsic_reward) / torch.maximum(
+            torch.tensor(1.0), torch.sum(mask)
+        )
         if summary.should_record():
             summary.add_scalar(
                 f"{self.name}/distill_loss",
@@ -296,5 +300,6 @@ class RND(PPO):
     def learn(self, model_dump_period=1.97e9 // 100, model_filename="model-{step}.pt"):
         runner = self.runner.run()
         for _ in trange(self.num_warmup_steps, leave=False):
-            next(runner)
+            if next(runner, None) is None:
+                break
         super().learn(model_dump_period, model_filename)

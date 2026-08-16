@@ -44,6 +44,7 @@ class Config:
     def __ior__(self, other: dict):
         for key, val in other.items():
             key = key.replace("-", "_")
+            self.unused.add(key)
             setattr(self, key, val)
         return self
 
@@ -86,7 +87,10 @@ class Factory(ABC):
             if getattr(self.config, "num_recordings", 0)
             else None
         )
-        return make_env(env_id, recording_period=recording_period, **kwargs)
+        env = make_env(env_id, recording_period=recording_period, **kwargs)
+        for key in kwargs:
+            self.config.unused.remove(key)
+        return env
 
     @abstractmethod
     def make_runner(self, env, model=None, nlogs=1e5, **kwargs):

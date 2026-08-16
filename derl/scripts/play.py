@@ -61,7 +61,7 @@ def record(env, policy, output_filepath, seed=0, nepisodes=1, fps=30):
     while nepisodes > 0:
         act = policy.act(obs, state, resets)
         obs, _, terminated, truncated, info = env.step(act["actions"])
-        state = act["policy_state"]
+        state = act.get("policy_state", None)
         resets[:] = terminated | truncated
         if info.get("real_done", terminated | truncated):
             nepisodes -= 1

@@ -57,10 +57,11 @@ class PPOFactory(Factory):
 
     def make_env(self, env_id, **kwargs):
         self.config |= kwargs
-        env_kwargs = {}
         if is_atari_id(env_id):
-            env_kwargs["num_queue_frames"] = 1 if self.recurrent else 4
-        env = super().make_env(env_id, nenvs=self.nenvs, **env_kwargs)
+            kwargs["num_queue_frames"] = 1 if self.recurrent else 4
+        kwargs.pop("nenvs")
+        kwargs.pop("recurrent")
+        env = super().make_env(env_id, nenvs=self.nenvs, **kwargs)
         return env
 
     def make_runner(self, env, model=None, nlogs=1e5, **kwargs):
